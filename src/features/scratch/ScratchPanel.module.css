@@ -1,0 +1,32 @@
+.panel {
+  display: grid;
+  align-content: start;
+}
+
+.caption {
+  margin: -12px 0 16px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.list {
+  margin-top: 8px;
+}
+
+.empty {
+  padding: 16px 0 4px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.more {
+  display: inline-block;
+  margin-top: 8px;
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-sky-strong);
+}
+
+.more:hover {
+  text-decoration: underline;
+}

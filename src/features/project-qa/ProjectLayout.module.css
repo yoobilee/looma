@@ -1,0 +1,116 @@
+.summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 28px 40px;
+}
+
+.eyebrow {
+  font: var(--text-caption);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-sky-strong);
+}
+
+.description {
+  max-width: 32em;
+  margin-top: 8px;
+  font: var(--text-heading);
+  letter-spacing: -0.025em;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 16px 0 0;
+}
+
+.facts dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.facts dd {
+  margin: 2px 0 0;
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+/* 단계 탭 — 네비게이션이므로 NavLink + aria-current */
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(max-content, 1fr));
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel-lg);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--radius-control-lg);
+  color: var(--color-muted);
+  font: var(--text-body-strong);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.tab:hover {
+  color: var(--color-ink);
+  background: var(--surface-hover);
+}
+
+.step {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  font: 700 10px/1 var(--font-sans);
+}
+
+.active,
+.active:hover {
+  background: var(--color-sky-soft);
+  color: var(--color-sky-strong);
+}
+
+.active .step {
+  background: var(--color-sky);
+  color: #fff;
+}
+
+.body {
+  margin-top: 40px;
+}
+
+@media (max-width: 767px) {
+  .summary {
+    flex-direction: column;
+    padding: 0 0 28px;
+  }
+
+  .description {
+    font-size: 20px;
+  }
+
+  .body {
+    margin-top: 28px;
+  }
+}

@@ -1,0 +1,259 @@
+// LOOMA_IMPLEMENTATION_SPEC.md 5장 데이터 모델을 TypeScript 타입으로 옮긴 것.
+// 날짜는 모두 ISO 8601 문자열로 다룬다.
+
+export type ThemePreference = 'light' | 'dark';
+
+export interface User {
+  id: string;
+  locale: 'ko-KR';
+  theme: ThemePreference;
+  calendarConnection: 'not_connected' | 'connected';
+}
+
+/* 업무 */
+export type TaskStatus = 'planned' | 'in_progress' | 'waiting' | 'done';
+export type TaskRepeat = 'none' | 'daily' | 'weekdays' | 'weekly';
+
+export interface Task {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  dueAt?: string;
+  projectId?: string;
+  notes?: string;
+  tags: string[];
+  repeat: TaskRepeat;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+/* 프로젝트 */
+export type ProjectStatus = 'preparing' | 'active' | 'archived';
+export type Platform = 'android' | 'ios' | 'web' | 'desktop';
+export type TestScope = 'functional' | 'ui_ux' | 'regression' | 'api' | 'performance' | 'compatibility';
+export type ProjectStage = 'deliverables' | 'requirements' | 'test_design' | 'results' | 'issues';
+
+export interface Project {
+  id: string;
+  name: string;
+  clientName?: string;
+  serviceName?: string;
+  status: ProjectStatus;
+  startDate?: string;
+  endDate?: string;
+  platforms: Platform[];
+  testScopes: TestScope[];
+  description?: string;
+  tcTemplateId?: string;
+  currentStage: ProjectStage;
+}
+
+/* 산출물 */
+export type DeliverableType = 'pdf' | 'xlsx' | 'csv' | 'docx' | 'image' | 'url' | 'figma';
+
+export interface Deliverable {
+  id: string;
+  projectId: string;
+  type: DeliverableType;
+  title: string;
+  sourceUrl?: string;
+  fileRef?: string;
+  version?: string;
+  summary?: string;
+  importedAt: string;
+  analyzedAt?: string;
+}
+
+/* 요구사항 · TC 공통 출처 구분 */
+export type SourceType = 'source_explicit' | 'ai_suggestion' | 'needs_confirmation';
+
+export interface SourceRef {
+  deliverableId: string;
+  locator: string; // 페이지, Frame, 셀 등 사람이 읽을 수 있는 위치
+}
+
+export type RequirementStatus = 'draft' | 'reviewed' | 'confirmed';
+
+export interface Requirement {
+  id: string;
+  projectId: string;
+  deliverableId: string;
+  feature: string;
+  text: string;
+  sourceLocator: string;
+  sourceType: SourceType;
+  confidence?: number;
+  needsConfirmation: boolean;
+  isChange: boolean;
+  status: RequirementStatus;
+}
+
+/* TC Template */
+export type TestResultValue = 'pass' | 'fail' | 'blocked' | 'not_tested';
+
+export interface ResultMapping {
+  rawValue: string;
+  result: TestResultValue;
+}
+
+export interface TCTemplate {
+  id: string;
+  projectId?: string;
+  name: string;
+  columns: string[];
+  idRule?: string;
+  depthRule?: string;
+  styleHints?: string;
+  resultMappings: ResultMapping[];
+}
+
+/* 테스트 케이스 */
+export type TestPerspective =
+  | 'normal_flow'
+  | 'exception'
+  | 'boundary'
+  | 'permission'
+  | 'state_change'
+  | 'data_io'
+  | 'api'
+  | 'performance'
+  | 'compatibility';
+
+export type ReviewStatus = 'draft' | 'reviewed' | 'confirmed';
+
+export interface TestCase {
+  id: string;
+  projectId: string;
+  templateId?: string;
+  externalId?: string;
+  category: TestPerspective;
+  feature: string;
+  depth: string[]; // 대분류 · 중분류 · 소분류
+  title: string;
+  precondition?: string;
+  steps: string[];
+  expectedResult: string;
+  sourceRefs: SourceRef[];
+  generationType: SourceType;
+  reviewStatus: ReviewStatus;
+  duplicateOf?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* 수행 결과 */
+export interface TestResultImport {
+  id: string;
+  projectId: string;
+  round: number;
+  fileRef: string;
+  importedAt: string;
+  mapping: ResultMapping[];
+}
+
+export interface TestResult {
+  id: string;
+  importId: string;
+  testCaseId?: string;
+  externalId: string;
+  feature: string;
+  title: string;
+  platform?: Platform;
+  result: TestResultValue;
+  issueId?: string;
+  note?: string;
+}
+
+/* 이슈 / 확인사항 */
+export type IssueType = 'defect' | 'question';
+export type IssueStatus = 'open' | 'fixed' | 'closed' | 'waiting' | 'checking' | 'answered';
+
+export interface Issue {
+  id: string;
+  projectId: string;
+  type: IssueType;
+  title: string;
+  status: IssueStatus;
+  feature?: string;
+  testCaseId?: string;
+  requirementId?: string; // 요구사항 분석의 확인 필요 항목에서 만든 경우
+  externalKey?: string; // BUG-014 같은 외부 이슈 번호
+  sourceRef?: SourceRef;
+  note?: string;
+  createdAt: string;
+}
+
+/* 업무 지식 */
+export interface KnowledgeAiDraft {
+  explanation: string;
+  relatedKeywords: string[];
+  createdAt: string;
+}
+
+export interface KnowledgeTerm {
+  id: string;
+  term: string;
+  explanation: string;
+  workMeaning?: string;
+  examples: string[];
+  relatedProjectIds: string[];
+  relatedTerms: string[];
+  tags: string[];
+  userNote?: string;
+  aiDraftUsed: boolean;
+  aiDraft?: KnowledgeAiDraft;
+  updatedAt: string;
+}
+
+/* 임시 작업공간 */
+export type ScratchType = 'text' | 'image' | 'url' | 'log' | 'json' | 'note';
+export type ScratchLinkTarget = 'task' | 'project' | 'record' | 'knowledge';
+
+export interface ScratchItem {
+  id: string;
+  type: ScratchType;
+  title?: string;
+  content: string;
+  createdAt: string;
+  expiresAt?: string;
+  pinnedAt?: string;
+  linkedType?: ScratchLinkTarget;
+  linkedId?: string;
+  contextProjectId?: string;
+}
+
+/* 활동 기록 */
+export type ActivityType =
+  | 'task_created'
+  | 'task_started'
+  | 'task_completed'
+  | 'memo_created'
+  | 'scratch_pinned'
+  | 'deliverable_added'
+  | 'requirements_analyzed'
+  | 'test_case_changed'
+  | 'results_uploaded'
+  | 'issue_created'
+  | 'project_changed'
+  | 'knowledge_saved';
+
+export interface Activity {
+  id: string;
+  projectId?: string;
+  taskId?: string;
+  type: ActivityType;
+  title: string;
+  metadata: Record<string, string>;
+  createdAt: string;
+}
+
+/* 외부 일정 (Google Calendar read-only 예정) */
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  location?: string;
+  sourceUrl: string;
+}

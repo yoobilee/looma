@@ -1,0 +1,67 @@
+.field {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--ambient-base);
+  pointer-events: none;
+}
+
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  will-change: transform;
+}
+
+.sky {
+  top: -18%;
+  left: -10%;
+  width: 62vw;
+  height: 62vw;
+  background: radial-gradient(circle, var(--ambient-sky) 0%, transparent 68%);
+  animation: drift-sky 34s ease-in-out infinite alternate;
+}
+
+.lilac {
+  top: 22%;
+  left: 30%;
+  width: 48vw;
+  height: 48vw;
+  background: radial-gradient(circle, var(--ambient-lilac) 0%, transparent 70%);
+  animation: drift-lilac 28s ease-in-out infinite alternate;
+}
+
+.coral {
+  right: -14%;
+  bottom: -24%;
+  width: 58vw;
+  height: 58vw;
+  background: radial-gradient(circle, var(--ambient-coral) 0%, transparent 68%);
+  animation: drift-coral 30s ease-in-out infinite alternate;
+}
+
+/* 이동폭은 화면 대비 1–3% 수준으로 제한한다 */
+@keyframes drift-sky {
+  to {
+    transform: translate3d(2.5vw, 1.5vh, 0) scale(1.02);
+  }
+}
+
+@keyframes drift-lilac {
+  to {
+    transform: translate3d(-1.5vw, 2vh, 0);
+  }
+}
+
+@keyframes drift-coral {
+  to {
+    transform: translate3d(-2vw, -2.5vh, 0) scale(1.03);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow {
+    animation: none;
+  }
+}

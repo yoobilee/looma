@@ -1,0 +1,55 @@
+.form {
+  display: grid;
+  gap: 14px;
+}
+
+.optional {
+  display: grid;
+  gap: 8px;
+}
+
+.optionalLabel {
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.toggles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.toggle {
+  min-height: 38px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control-lg);
+  background: var(--surface);
+  color: var(--color-muted);
+  font: var(--text-body-strong);
+  font-size: 12px;
+}
+
+.toggle:hover {
+  border-color: var(--color-line-strong);
+  color: var(--color-ink);
+}
+
+.toggleOn,
+.toggleOn:hover {
+  border-color: transparent;
+  background: var(--color-sky-soft);
+  color: var(--color-sky-strong);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status {
+  font: var(--text-caption);
+  color: var(--color-sky-strong);
+}

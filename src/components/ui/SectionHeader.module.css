@@ -1,0 +1,40 @@
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-height: 28px;
+  margin-bottom: var(--space-4);
+}
+
+.title {
+  font: var(--text-section);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.meta {
+  margin-left: auto;
+  font: var(--text-caption);
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.coral {
+  color: var(--color-coral-strong);
+  font-weight: 700;
+}
+
+.sky {
+  color: var(--color-sky-strong);
+  font-weight: 700;
+}
+
+.action {
+  margin-left: auto;
+}
+
+.meta + .action {
+  margin-left: var(--space-2);
+}

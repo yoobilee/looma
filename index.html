@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="개인 업무와 QA 프로젝트 실무를 잇는 업무 도우미" />
+    <title>Looma</title>
+    <script>
+      // 첫 화면 깜빡임 방지: 저장된 테마를 렌더 전에 적용한다. 기본은 라이트.
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem('looma.theme') === 'dark' ? 'dark' : 'light';
+      } catch {
+        document.documentElement.dataset.theme = 'light';
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

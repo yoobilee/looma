@@ -1,0 +1,127 @@
+.status {
+  display: grid;
+  align-content: start;
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  align-items: end;
+  gap: 12px;
+  margin: 0;
+}
+
+.figures dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.figures dd {
+  margin: 4px 0 0;
+  font: 800 26px/1.1 var(--font-sans);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.figureMain dd {
+  font-size: 48px;
+  letter-spacing: -0.04em;
+}
+
+.figureMain dd span {
+  margin-left: 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.calendar {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-line);
+}
+
+.calendarLabel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.sample {
+  font-weight: 500;
+  color: var(--color-soft);
+}
+
+.nextEvent {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 14px 40px 14px 16px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.nextEvent:hover {
+  border-color: color-mix(in srgb, var(--color-sky) 45%, var(--color-line));
+}
+
+.eventTime {
+  font: 800 18px/1.2 var(--font-sans);
+  color: var(--color-sky-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.eventTitle {
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.eventMeta {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.eventIcon {
+  position: absolute;
+  top: 16px;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  color: var(--color-soft);
+}
+
+.noEvent {
+  color: var(--color-muted);
+}
+
+.later {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.later a {
+  display: flex;
+  gap: 10px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  font: var(--text-caption);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.later a:hover {
+  color: var(--color-ink);
+}
+
+.later a span:first-child {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}

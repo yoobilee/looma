@@ -1,0 +1,16 @@
+.preview {
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control-lg);
+  background: var(--surface);
+  font: 400 13px/1.8 var(--font-sans);
+  white-space: pre-wrap;
+}
+
+.status {
+  margin-right: auto;
+  align-self: center;
+  font: var(--text-caption);
+  color: var(--color-sky-strong);
+}

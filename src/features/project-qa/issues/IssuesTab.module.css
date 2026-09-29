@@ -1,0 +1,153 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 56px;
+  align-items: start;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.item {
+  display: grid;
+  gap: 6px;
+  padding: 20px 22px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.closed {
+  background: transparent;
+}
+
+.closed .title {
+  color: var(--color-muted);
+}
+
+.itemHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.key {
+  font: var(--text-caption);
+  font-weight: 800;
+  color: var(--color-sky-strong);
+}
+
+.title {
+  font: var(--text-body-strong);
+}
+
+.links {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.note {
+  font: var(--text-caption);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.statusSelect select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--surface);
+  font: var(--text-caption);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.status_open,
+.status_waiting {
+  color: var(--color-coral-strong);
+}
+
+.status_fixed,
+.status_checking {
+  color: var(--status-blocked);
+}
+
+.status_closed,
+.status_answered {
+  color: var(--status-pass);
+}
+
+.questions > :first-child {
+  margin-bottom: 4px;
+}
+
+.caption {
+  margin-bottom: 14px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.questionList {
+  display: grid;
+  gap: 10px;
+}
+
+.question {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--color-coral-soft);
+  border-radius: var(--radius-panel);
+  background: var(--color-coral-softer);
+}
+
+.question .statusSelect {
+  margin-top: 6px;
+}
+
+.answered {
+  border-color: var(--color-line);
+  background: transparent;
+}
+
+.bundle {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--color-sky-soft);
+  border-radius: var(--radius-panel);
+  background: var(--color-sky-softer);
+  text-align: left;
+}
+
+.bundle:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-sky) 45%, transparent);
+}
+
+.bundle:disabled {
+  opacity: 0.5;
+}
+
+.bundle strong {
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.bundle span {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: 44px;
+  }
+}

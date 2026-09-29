@@ -1,0 +1,15 @@
+.groups {
+  display: grid;
+  gap: 40px;
+  max-width: 720px;
+}
+
+.group {
+  display: grid;
+  gap: 18px;
+}
+
+.day {
+  font: var(--text-body-strong);
+  font-weight: 800;
+}
