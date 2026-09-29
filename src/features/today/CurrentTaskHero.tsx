@@ -17,7 +17,7 @@ interface CurrentTaskHeroProps {
 
 const FOCUS_BLOCK_MINUTES = 90;
 
-/** 지금 하고 있는 업무. 카드 없이 ambient field 위에 바로 놓아 화면의 중심이 되게 한다. */
+/** 지금 하고 있는 업무. 부드러운 gradient 면으로 묶어 Today 화면의 시각적 기준점이 되게 한다. */
 export function CurrentTaskHero({ task, nextTask, projectName, relatedCount, now }: CurrentTaskHeroProps) {
   const { openScratchDrawer } = useAppCommands();
   const [notesOpen, setNotesOpen] = useState(false);

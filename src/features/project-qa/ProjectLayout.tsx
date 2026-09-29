@@ -68,28 +68,28 @@ export function ProjectLayout() {
       />
 
       {isOverview && (
-        <section className={styles.summary} aria-label="프로젝트 기본 정보">
-          <div>
+        <section className={styles.summary} aria-label="프로젝트 기본 정보" data-status={data.status}>
+          <div className={styles.intro}>
             <p className={styles.eyebrow}>
               {projectStatusLabel[data.status]} · {data.testScopes.map((scope) => testScopeLabel[scope]).join(' · ')}
             </p>
             <p className={styles.description}>{data.description ?? '프로젝트 설명을 추가하면 TC 양식 초안에 활용할 수 있어요.'}</p>
-            <dl className={styles.facts}>
-              <div>
-                <dt>고객사 / 서비스</dt>
-                <dd>{[data.clientName, data.serviceName].filter(Boolean).join(' · ') || '미정'}</dd>
-              </div>
-              <div>
-                <dt>기간</dt>
-                <dd>{formatDateRange(data.startDate, data.endDate)}</dd>
-              </div>
-              <div>
-                <dt>플랫폼</dt>
-                <dd>{data.platforms.map((platform) => platformLabel[platform]).join(' / ') || '미정'}</dd>
-              </div>
-            </dl>
           </div>
-          <Button variant="primary" icon={<Plus aria-hidden />} onClick={() => setDeliverableOpen(true)}>
+          <dl className={styles.facts}>
+            <div>
+              <dt>고객사 / 서비스</dt>
+              <dd>{[data.clientName, data.serviceName].filter(Boolean).join(' · ') || '미정'}</dd>
+            </div>
+            <div>
+              <dt>기간</dt>
+              <dd>{formatDateRange(data.startDate, data.endDate)}</dd>
+            </div>
+            <div>
+              <dt>플랫폼</dt>
+              <dd>{data.platforms.map((platform) => platformLabel[platform]).join(' / ') || '미정'}</dd>
+            </div>
+          </dl>
+          <Button variant="primary" icon={<Plus aria-hidden />} onClick={() => setDeliverableOpen(true)} className={styles.action}>
             산출물 추가
           </Button>
         </section>
