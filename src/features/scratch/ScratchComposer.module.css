@@ -1,0 +1,84 @@
+.composer {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px 12px;
+  border: 1.5px dashed color-mix(in srgb, var(--color-sky) 34%, var(--color-line));
+  border-radius: var(--radius-panel-lg);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--color-coral-softer) 100%, transparent)),
+    var(--surface);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.composer:focus-within {
+  border-color: var(--color-sky);
+}
+
+.label {
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.input {
+  min-height: 24px;
+  max-height: 180px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  field-sizing: content;
+  color: var(--color-ink);
+  font: var(--text-body);
+}
+
+.input::placeholder {
+  color: var(--color-muted);
+}
+
+.input:focus-visible {
+  box-shadow: none;
+}
+
+.large {
+  padding: 24px 26px 18px;
+  border-radius: var(--radius-hero-lg);
+}
+
+.large .label {
+  font: var(--text-section);
+}
+
+.large .input {
+  min-height: 72px;
+  font-size: 14px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.typeSelect select {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
+}
+
+.message {
+  min-height: 0;
+  font: var(--text-caption);
+  color: var(--color-sky-strong);
+}
+
+.message:empty {
+  display: none;
+}

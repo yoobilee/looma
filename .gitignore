@@ -17,3 +17,10 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+
+# Node / Vite
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+coverage/

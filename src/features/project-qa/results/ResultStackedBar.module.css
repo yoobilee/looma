@@ -1,0 +1,67 @@
+.bar {
+  display: flex;
+  gap: 2px; /* 조각 사이 surface 간격 */
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.regular {
+  height: 10px;
+}
+
+.large {
+  height: 14px;
+}
+
+.segment {
+  min-width: 3px;
+  flex-basis: 0;
+  border-radius: 2px;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.segment:hover {
+  opacity: 0.8;
+}
+
+.empty {
+  flex: 1;
+  background: var(--surface-sunken);
+}
+
+.pass {
+  background: var(--status-pass-mark);
+}
+
+.fail {
+  background: var(--status-fail-mark);
+}
+
+.blocked {
+  background: var(--status-blocked-mark);
+}
+
+.not_tested {
+  background: var(--status-untested-mark);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}

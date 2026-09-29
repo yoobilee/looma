@@ -1,0 +1,106 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-control-lg);
+  font: var(--text-body-strong);
+  font-size: 13px;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  opacity: 0.48;
+}
+
+.button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.md {
+  min-height: 40px;
+  padding: 0 18px;
+}
+
+.sm {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: var(--radius-control);
+}
+
+.sm svg {
+  width: 14px;
+  height: 14px;
+}
+
+.iconOnly.md {
+  width: 40px;
+  padding: 0;
+}
+
+.iconOnly.sm {
+  width: 32px;
+  padding: 0;
+}
+
+/* 주요 실행: 잉크 */
+.primary {
+  background: var(--surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-inverse) 86%, var(--color-sky));
+}
+
+/* 브랜드 강조: Sky Blue. 화면당 하나만 쓴다 */
+.accent {
+  background: var(--color-sky);
+  color: #fff;
+}
+
+.accent:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-sky) 88%, #000);
+}
+
+.secondary {
+  background: var(--surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  background: var(--surface-soft);
+}
+
+.ghost {
+  color: var(--color-muted);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--color-ink);
+}
+
+/* 어두운 블록 위 */
+.inverse {
+  background: var(--surface);
+  color: var(--color-ink);
+}
+
+.inverse:hover:not(:disabled) {
+  background: var(--surface-soft);
+}

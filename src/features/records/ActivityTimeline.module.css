@@ -1,0 +1,68 @@
+.timeline {
+  position: relative;
+}
+
+.entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px 20px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 16px;
+  padding-bottom: 32px;
+}
+
+.compact .entry {
+  padding-bottom: 22px;
+}
+
+.entry:last-child {
+  padding-bottom: 0;
+}
+
+/* 세로선 */
+.entry:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 16px;
+  bottom: -2px;
+  left: calc(52px + 16px + 9.5px);
+  width: 1px;
+  background: var(--color-line);
+}
+
+.time {
+  padding-top: 1px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dot {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin: 5px auto 0;
+  border-radius: 50%;
+  background: var(--color-line-strong);
+  box-shadow: 0 0 0 4px var(--surface-page);
+}
+
+.dotStrong {
+  background: var(--color-sky);
+}
+
+.body {
+  display: grid;
+  gap: 3px;
+}
+
+.title {
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.detail {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}

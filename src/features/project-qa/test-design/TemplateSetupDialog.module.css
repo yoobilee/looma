@@ -1,0 +1,78 @@
+.form {
+  display: grid;
+  gap: 20px;
+}
+
+.form input[type='file'] {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.detection {
+  padding: 18px 20px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.detectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.detectionHeader h3 {
+  font: var(--text-body-strong);
+}
+
+.facts {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.facts dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+  padding-top: 2px;
+}
+
+.facts dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.columns span {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  font: var(--text-caption);
+  font-weight: 600;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .facts > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

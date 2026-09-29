@@ -1,0 +1,23 @@
+.track {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+
+.regular {
+  height: 4px;
+}
+
+.thin {
+  height: 2px;
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--gradient-progress);
+  transition: width var(--duration-base) var(--ease-out);
+}

@@ -1,0 +1,55 @@
+.state {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-6);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-panel);
+}
+
+.compact {
+  padding: var(--space-5);
+}
+
+.title {
+  font: var(--text-body-strong);
+}
+
+.error {
+  color: var(--status-fail);
+}
+
+.description {
+  color: var(--color-muted);
+}
+
+.action {
+  margin-top: var(--space-2);
+}
+
+.loading {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+
+.shimmer {
+  height: 14px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-sunken), var(--surface-soft), var(--surface-sunken));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.shimmer:last-child {
+  width: 60%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}

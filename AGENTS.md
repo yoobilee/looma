@@ -103,42 +103,45 @@
 
 ## 프로젝트별 컨벤션
 
-- 프로젝트명: 미정
-- 기술 스택: 미정
-- 기술 선택 이유: 미정
-- 배포 환경: Vercel 우선 후보, 프로젝트에 맞게 확정
-- 데이터 저장: Supabase 우선 후보, 프로젝트에 맞게 확정
-- 외부 서비스 연동: 미정
-- 지원 기기·브라우저: 미정
-- 패키지 관리 도구: 미정
-- 잠금 파일: 미정
-- 테스트 도구: 미정
+- 프로젝트명: Looma — 개인 업무 관리와 QA 프로젝트 실무를 잇는 한국어 전용 업무 도우미 웹앱
+- 기술 스택: Vite + React 19 + TypeScript, React Router, CSS Modules + CSS 변수 토큰, lucide-react(아이콘), Pretendard(글꼴)
+- 기술 선택 이유: 하루 종일 켜두는 개인 도구라 SSR·SEO가 필요 없고, 1차 범위가 mock 데이터 기반이라 가벼운 SPA가 적합하다. glass·ambient·토큰을 직접 제어하려고 CSS Modules를 쓴다.
+- 배포 환경: Vercel (정적 SPA 배포, `vercel.json`의 rewrites로 모든 경로를 `index.html`로 연결). OAuth·AI 키가 필요해지면 Vercel Functions 또는 Supabase Edge Functions로 서버 측 처리
+- 데이터 저장: 1차는 메모리 mock (`src/data/mock`). UI는 `src/data/repositories` 인터페이스만 사용하며, Supabase 등 실제 저장소는 `src/data/index.ts`에서 구현만 교체한다.
+- 외부 서비스 연동: Google Calendar(read-only), Figma API, AI 분석, 파일 파싱·XLSX — 모두 2차 범위, 현재 미연결
+- 지원 기기·브라우저: 최신 Chrome·Edge·Safari·Firefox, 데스크톱 우선 + 태블릿·모바일(390px) 대응
+- 패키지 관리 도구: npm
+- 잠금 파일: `package-lock.json`
+- 테스트 도구: Vitest (도메인 로직·mock 저장소 단위 테스트)
 - 커버리지 정책: 초기 미사용
 - 백로그 위치: GitHub Issues 또는 필요 시 `.ai/BACKLOG.md`
-- 레퍼런스 출처: 없음
+- 레퍼런스 출처: `design/looma/` Penpot export (foundations.svg, 화면 10종), 기능 정의는 `docs/looma/LOOMA_IMPLEMENTATION_SPEC.md`
 
 ### 디자인 방향
 
-- 디자인 시스템 사용 여부·선택 이유: 미정
-- 브랜드 고유 요소와 유지할 자산: 미정
-- 화면 밀도·정보 계층·시각적 분위기: 미정
-- 참고 범위와 피할 표현: 미정
+- 디자인 시스템 사용 여부·선택 이유: 외부 디자인 시스템 미사용. `src/styles/tokens.css`의 자체 토큰(foundations.svg 기준)과 `src/components/ui` 공통 컴포넌트를 사용한다.
+- 브랜드 고유 요소와 유지할 자산: Sky Blue #4D8EF7, Soft Coral #F28B7B, Pearl/Lilac #FBFAFF 브리지, Ink #151821, 하나의 연속적인 ambient field, 플로팅 glass 사이드바
+- 화면 밀도·정보 계층·시각적 분위기: 안정적인 현대 웹앱 75% + 선도적 포인트 25%. 라이트 기본·다크 선택. 임시 작업공간은 항상 높은 위계
+- 참고 범위와 피할 표현: glass는 사이드바·검색·작은 플로팅 컨트롤·팝오버/모달에만. 과한 glow·grid·neon cyan/purple, 같은 둥근 카드 반복을 피한다. 우선순위는 Starter Pack 규칙 > SPEC(기능) > Penpot(시각)
+- UI 문구: 한국어만 사용. PASS/FAIL/BLOCKED, TC, Android/iOS 등 QA 실무 용어는 원문 유지. 화면 라벨은 `src/domain/labels.ts`에서 관리
+- 명명: 컴포넌트는 PascalCase 파일(`ResultDashboardTab.tsx`), 훅·유틸은 camelCase, 기능별 코드는 `src/features/<기능>`에 둔다.
 
 ### 명령
 
-- 설치: 미정
-- 개발 실행: 미정
-- Lint: 미정
-- Test: 미정
-- Build: 미정
-- 전체 검증: 미정
+- 설치: `npm ci`
+- 개발 실행: `npm run dev`
+- Lint: `npm run lint`
+- Type Check: `npm run typecheck`
+- Test: `npm run test`
+- Build: `npm run build`
+- 전체 검증: `npm run verify` (lint → typecheck → test → build)
 
 ### Git·배포 설정
 
-- 기본 브랜치: 미정
+- 기본 브랜치: `main`
 - 브랜치 접두사: `feature`, `fix`, `refactor`, `chore`
-- 버전 배포 사용 여부: 미정
-- 버전 기준 파일: 미정
+- 버전 배포 사용 여부: 아직 사용하지 않음
+- 버전 기준 파일: `package.json`
 - 태그 형식: `vX.Y.Z`
 - 배포 절차 재정의: 없음
 

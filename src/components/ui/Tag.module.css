@@ -1,0 +1,51 @@
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font: var(--text-caption);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.neutral {
+  background: var(--surface-sunken);
+  color: var(--color-muted);
+}
+
+.sky {
+  background: var(--color-sky-soft);
+  color: var(--color-sky-strong);
+}
+
+.coral {
+  background: var(--color-coral-soft);
+  color: var(--color-coral-strong);
+}
+
+.outline {
+  border: 1px dashed var(--color-line-strong);
+  color: var(--color-muted);
+}
+
+.pass {
+  background: var(--status-pass-soft);
+  color: var(--status-pass);
+}
+
+.fail {
+  background: var(--status-fail-soft);
+  color: var(--status-fail);
+}
+
+.blocked {
+  background: var(--status-blocked-soft);
+  color: var(--status-blocked);
+}
+
+.untested {
+  background: var(--status-untested-soft);
+  color: var(--status-untested);
+}
