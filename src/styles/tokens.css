@@ -37,6 +37,9 @@
   --surface-sunken: #eef2f8;
   --surface-inverse: #151821;
   --surface-hover: rgba(21, 24, 33, 0.035);
+  /* 화면의 시각적 기준점: Today 현재 업무(hero), 프로젝트 작업공간 요약(workspace). glass가 아닌 solid gradient */
+  --surface-hero: linear-gradient(125deg, #edf3fe 0%, #f3f5ff 40%, #fbfaff 62%, #fff2ef 100%);
+  --surface-workspace: linear-gradient(100deg, #f2f6ff 0%, #fbfaff 56%, #fff5f2 100%);
 
   /* Ambient field */
   --ambient-base: linear-gradient(135deg, #fbfdff 0%, #f4f8ff 30%, #fbfaff 58%, #fff6f3 100%);
@@ -47,6 +50,7 @@
   /* Glass: 사이드바 · 검색 · 작은 플로팅 컨트롤 · 팝오버/모달 컨트롤 레이어 전용 */
   --glass-bg: rgba(255, 255, 255, 0.64);
   --glass-bg-strong: rgba(255, 255, 255, 0.82);
+  --glass-bg-popover: rgba(255, 255, 255, 0.94); /* 팝오버·드롭다운·+ 메뉴·다이얼로그: 뒤 콘텐츠가 비치지 않는 거의 불투명한 glass */
   --glass-border: rgba(255, 255, 255, 0.9);
   --glass-edge: rgba(21, 24, 33, 0.06);
   --glass-blur: 20px;
@@ -99,6 +103,8 @@
   /* 깊이 */
   --shadow-float: 0 18px 40px -18px rgba(21, 24, 33, 0.22), 0 2px 6px rgba(21, 24, 33, 0.04);
   --shadow-panel: 0 1px 2px rgba(21, 24, 33, 0.04);
+  --shadow-hero: 0 1px 2px rgba(21, 24, 33, 0.04), 0 16px 36px -28px rgba(21, 24, 33, 0.24);
+  --shadow-raise: 0 2px 4px rgba(21, 24, 33, 0.03), 0 14px 32px -20px rgba(21, 24, 33, 0.2);
   --shadow-pop: 0 24px 60px -20px rgba(21, 24, 33, 0.28), 0 4px 12px rgba(21, 24, 33, 0.06);
   --focus-ring: 0 0 0 3px rgba(77, 142, 247, 0.35);
 
@@ -141,6 +147,8 @@
   --surface-sunken: #13151c;
   --surface-inverse: #eef0f5;
   --surface-hover: rgba(255, 255, 255, 0.04);
+  --surface-hero: linear-gradient(125deg, #182033 0%, #1a1d2c 40%, #1b1c26 62%, #261d21 100%);
+  --surface-workspace: linear-gradient(100deg, #171d2b 0%, #1a1c26 56%, #221c1f 100%);
 
   --ambient-base: linear-gradient(135deg, #0f1320 0%, #11131c 35%, #14131b 60%, #1a1416 100%);
   --ambient-sky: rgba(77, 142, 247, 0.14);
@@ -149,6 +157,7 @@
 
   --glass-bg: rgba(26, 29, 38, 0.62);
   --glass-bg-strong: rgba(26, 29, 38, 0.86);
+  --glass-bg-popover: rgba(26, 29, 38, 0.95);
   --glass-border: rgba(255, 255, 255, 0.07);
   --glass-edge: rgba(0, 0, 0, 0.3);
 
@@ -167,6 +176,8 @@
 
   --shadow-float: 0 18px 40px -18px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.25);
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-hero: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 36px -28px rgba(0, 0, 0, 0.6);
+  --shadow-raise: 0 2px 4px rgba(0, 0, 0, 0.25), 0 14px 32px -20px rgba(0, 0, 0, 0.6);
   --shadow-pop: 0 24px 60px -20px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.3);
   --focus-ring: 0 0 0 3px rgba(110, 163, 255, 0.45);
 }

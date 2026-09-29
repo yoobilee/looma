@@ -10,14 +10,14 @@ export function ProjectRow({ overview }: { overview: ProjectOverview }) {
   const { project } = overview;
   const archived = project.status === 'archived';
   const stats = [
-    `산출물 ${overview.deliverableCount}`,
-    `TC ${overview.testCaseCount}`,
-    overview.draftCount > 0 && `초안 ${overview.draftCount}`,
-    overview.hasTemplate ? 'TC Template 설정됨' : 'TC Template 미설정',
-  ].filter(Boolean);
+    { label: '산출물', value: overview.deliverableCount },
+    { label: 'TC', value: overview.testCaseCount },
+    ...(overview.draftCount > 0 ? [{ label: '초안', value: overview.draftCount }] : []),
+    { label: 'TC Template', value: overview.hasTemplate ? '설정됨' : '미설정' },
+  ];
 
   return (
-    <Link to={`/projects/${project.id}`} className={`${styles.row} ${archived ? styles.archived : ''}`}>
+    <Link to={`/projects/${project.id}`} className={`${styles.row} ${archived ? styles.archived : ''}`} data-status={project.status}>
       <div className={styles.main}>
         <p className={`${styles.status} ${styles[project.status]}`}>{projectStatusLabel[project.status]}</p>
         <h2 className={styles.name}>{project.name}</h2>
@@ -33,7 +33,14 @@ export function ProjectRow({ overview }: { overview: ProjectOverview }) {
           {formatDateRange(project.startDate, project.endDate)}
         </p>
         <p className={styles.stats}>
-          {stats.join(' · ')}
+          <span>
+            {stats.map((stat, index) => (
+              <span key={stat.label}>
+                {index > 0 && <span className={styles.separator}> · </span>}
+                {stat.label} <strong className={styles.statValue}>{stat.value}</strong>
+              </span>
+            ))}
+          </span>
           {!archived && <span className={styles.stage}>현재 단계 · {projectStageLabel[project.currentStage]}</span>}
         </p>
       </div>

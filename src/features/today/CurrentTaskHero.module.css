@@ -1,16 +1,30 @@
+/* 화면의 시각적 기준점. glass 없이 Sky Blue → Pearl/Lilac → Soft Coral solid gradient 면으로 둔다 */
 .hero {
   display: grid;
   gap: 10px;
-  padding: 8px 28px 8px 28px;
-  border-left: 2px solid transparent;
-  border-image: var(--gradient-brand) 1;
+  padding: 36px 40px 30px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-hero-lg);
+  background: var(--surface-hero);
+  box-shadow: var(--shadow-hero);
 }
 
 .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font: var(--text-caption);
   font-size: 12px;
   font-weight: 700;
   color: var(--color-sky-strong);
+}
+
+.eyebrow::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gradient-brand);
 }
 
 .title {
@@ -68,7 +82,8 @@
 
 @media (max-width: 767px) {
   .hero {
-    padding: 4px 0 4px 18px;
+    padding: 26px 22px 22px;
+    border-radius: var(--radius-hero);
   }
 
   .title {

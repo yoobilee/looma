@@ -1,16 +1,52 @@
+/*
+ * 프로젝트 하나 = 하나의 작업 단위. solid 면 + 얕은 깊이로 구분하고,
+ * 진행률 영역 쪽에만 상태 색을 아주 옅게 번지게 해 같은 카드 반복처럼 보이지 않게 한다.
+ */
 .row {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px 24px;
   align-items: center;
-  gap: 48px;
-  padding: 36px 28px;
-  border-radius: var(--radius-hero);
-  transition: background-color var(--duration-base) var(--ease-out);
+  gap: 32px;
+  padding: 30px 32px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  transition:
+    transform var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out),
+    border-color var(--duration-base) var(--ease-out);
+}
+
+.row[data-status='active'] {
+  background:
+    radial-gradient(ellipse 42% 150% at 100% 50%, var(--color-sky-softer), transparent 72%),
+    var(--surface);
+}
+
+.row[data-status='preparing'] {
+  background:
+    radial-gradient(ellipse 42% 150% at 100% 50%, var(--color-coral-softer), transparent 72%),
+    var(--surface);
+}
+
+/* 보관 프로젝트는 면을 가라앉혀 진행 중 프로젝트보다 낮은 위계로 둔다 */
+.row.archived {
+  background: var(--surface-soft);
+  box-shadow: none;
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  transform: translateY(-2px);
+  border-color: var(--color-line-strong);
+  box-shadow: var(--shadow-raise);
+}
+
+/* 전역 :focus-visible 링을 box-shadow가 덮지 않도록 함께 지정한다 */
+.row:focus-visible {
+  border-radius: var(--radius-panel-lg);
+  box-shadow: var(--focus-ring), var(--shadow-raise);
 }
 
 .main {
@@ -20,8 +56,19 @@
 }
 
 .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font: var(--text-caption);
   font-weight: 700;
+}
+
+.status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .active {
@@ -57,19 +104,40 @@
 .stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  align-items: center;
+  gap: 6px 16px;
+  margin-top: 6px;
   font: var(--text-caption);
+  font-size: 12px;
   color: var(--color-muted);
 }
 
+.separator {
+  color: var(--color-soft);
+}
+
+.statValue {
+  color: var(--color-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .stage {
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
   color: var(--color-ink);
   font-weight: 700;
 }
 
+/* 진행률은 hairline으로 나눈 별도 영역으로 읽히게 한다 */
 .progress {
   display: grid;
   gap: 10px;
+  align-self: stretch;
+  align-content: center;
+  padding-left: 32px;
+  border-left: 1px solid var(--color-line);
 }
 
 .rate {
@@ -113,7 +181,13 @@
   .row {
     grid-template-columns: 1fr;
     gap: 20px;
-    padding: 28px 8px;
+    padding: 24px 22px;
+  }
+
+  .progress {
+    padding: 18px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--color-line);
   }
 
   .rate,

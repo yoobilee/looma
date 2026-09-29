@@ -1,9 +1,31 @@
+/*
+ * 프로젝트 작업공간 머리. Today hero와 같은 색 언어(workspace gradient)를 쓰되
+ * 가로로 흐르는 면 + 아래 정보 띠 구조로 "작업공간 헤더"처럼 읽히게 한다. glass는 쓰지 않는다.
+ */
 .summary {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 0 28px 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'intro action'
+    'facts facts';
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-hero);
+  background: var(--surface-workspace);
+  box-shadow: var(--shadow-panel);
+}
+
+.intro {
+  grid-area: intro;
+  min-width: 0;
+  padding: 30px 24px 26px 32px;
+}
+
+.action {
+  grid-area: action;
+  align-self: start;
+  margin: 30px 32px 0 0;
 }
 
 .eyebrow {
@@ -13,6 +35,14 @@
   color: var(--color-sky-strong);
 }
 
+.summary[data-status='preparing'] .eyebrow {
+  color: var(--color-coral-strong);
+}
+
+.summary[data-status='archived'] .eyebrow {
+  color: var(--color-muted);
+}
+
 .description {
   max-width: 32em;
   margin-top: 8px;
@@ -20,11 +50,25 @@
   letter-spacing: -0.025em;
 }
 
+/* 고객사 · 기간 · 플랫폼: gradient 면 아래에 붙은 옅은 정보 띠 */
 .facts {
+  grid-area: facts;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 32px;
-  margin: 16px 0 0;
+  gap: 10px 0;
+  margin: 0;
+  padding: 14px 32px 16px;
+  border-top: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
+}
+
+.facts > div {
+  padding-right: 28px;
+}
+
+.facts > div + div {
+  padding-left: 28px;
+  border-left: 1px solid var(--color-line);
 }
 
 .facts dt {
@@ -102,8 +146,31 @@
 
 @media (max-width: 767px) {
   .summary {
-    flex-direction: column;
-    padding: 0 0 28px;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'intro'
+      'action'
+      'facts';
+  }
+
+  .intro {
+    padding: 24px 22px 16px;
+  }
+
+  .action {
+    justify-self: start;
+    margin: 0 22px 20px;
+  }
+
+  .facts {
+    padding: 14px 22px 16px;
+  }
+
+  .facts > div,
+  .facts > div + div {
+    flex: 1 1 100%;
+    padding: 0;
+    border-left: 0;
   }
 
   .description {
