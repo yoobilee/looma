@@ -50,6 +50,7 @@
   /* Glass: 사이드바 · 검색 · 작은 플로팅 컨트롤 · 팝오버/모달 컨트롤 레이어 전용 */
   --glass-bg: rgba(255, 255, 255, 0.64);
   --glass-bg-strong: rgba(255, 255, 255, 0.82);
+  --glass-bg-popover: rgba(255, 255, 255, 0.94); /* 팝오버·드롭다운·+ 메뉴·다이얼로그: 뒤 콘텐츠가 비치지 않는 거의 불투명한 glass */
   --glass-border: rgba(255, 255, 255, 0.9);
   --glass-edge: rgba(21, 24, 33, 0.06);
   --glass-blur: 20px;
@@ -156,6 +157,7 @@
 
   --glass-bg: rgba(26, 29, 38, 0.62);
   --glass-bg-strong: rgba(26, 29, 38, 0.86);
+  --glass-bg-popover: rgba(26, 29, 38, 0.95);
   --glass-border: rgba(255, 255, 255, 0.07);
   --glass-edge: rgba(0, 0, 0, 0.3);
 
