@@ -106,7 +106,7 @@
 - 프로젝트명: Looma — 개인 업무 관리와 QA 프로젝트 실무를 잇는 한국어 전용 업무 도우미 웹앱
 - 기술 스택: Vite + React 19 + TypeScript, React Router, CSS Modules + CSS 변수 토큰, lucide-react(아이콘), Pretendard(글꼴)
 - 기술 선택 이유: 하루 종일 켜두는 개인 도구라 SSR·SEO가 필요 없고, 1차 범위가 mock 데이터 기반이라 가벼운 SPA가 적합하다. glass·ambient·토큰을 직접 제어하려고 CSS Modules를 쓴다.
-- 배포 환경: Vercel 우선 후보 (아직 배포하지 않음). OAuth·AI 키가 필요해지면 Vercel Functions 또는 Supabase Edge Functions로 서버 측 처리
+- 배포 환경: Vercel (정적 SPA 배포, `vercel.json`의 rewrites로 모든 경로를 `index.html`로 연결). OAuth·AI 키가 필요해지면 Vercel Functions 또는 Supabase Edge Functions로 서버 측 처리
 - 데이터 저장: 1차는 메모리 mock (`src/data/mock`). UI는 `src/data/repositories` 인터페이스만 사용하며, Supabase 등 실제 저장소는 `src/data/index.ts`에서 구현만 교체한다.
 - 외부 서비스 연동: Google Calendar(read-only), Figma API, AI 분석, 파일 파싱·XLSX — 모두 2차 범위, 현재 미연결
 - 지원 기기·브라우저: 최신 Chrome·Edge·Safari·Firefox, 데스크톱 우선 + 태블릿·모바일(390px) 대응
