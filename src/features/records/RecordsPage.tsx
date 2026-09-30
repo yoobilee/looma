@@ -26,6 +26,7 @@ const summaryPhrases: Partial<Record<ActivityType, (count: number) => string>> =
   results_uploaded: (count) => `수행 결과 ${count}건을 업로드했어요`,
   issue_created: (count) => `이슈·확인사항 ${count}건을 등록했어요`,
   knowledge_saved: (count) => `업무 지식 ${count}건을 정리했어요`,
+  changes_applied: (count) => `변경사항 ${count}건을 반영했어요`,
 };
 
 /** AI 요약 연결 전까지 쓰는 규칙 기반 하루 정리 */

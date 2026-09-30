@@ -195,22 +195,41 @@ export interface TestResult {
   note?: string;
 }
 
-/* 변경 영향 분석 — 새 산출물이 들어왔을 때 기존 자산 기준으로 만든 "제안". 실제 요구사항·TC는 바꾸지 않는다. */
+/*
+ * 변경 영향 분석 — 새 산출물이 들어왔을 때 기존 자산 기준으로 만든 "제안".
+ * 사람이 항목별로 판단(draft) → 검토 완료(reviewed) → 명시적으로 반영(applied)해야 실제 요구사항·TC가 바뀐다.
+ */
 export type RequirementChangeKind = 'added' | 'modified' | 'removed' | 'unchanged';
+/** 사람의 판단. unchanged·keep처럼 판단이 필요 없는 항목에는 두지 않는다. */
+export type ReviewDecision = 'pending' | 'accepted' | 'rejected';
+
+/** 요구사항을 새로 만들거나 수정할 때 쓰는 내용. 근거 유형은 분석이 가진 값을 그대로 쓴다. */
+export type RequirementProposal = Pick<Requirement, 'text' | 'sourceType' | 'needsConfirmation' | 'confidence'>;
 
 export interface RequirementChange {
   id: string;
   kind: RequirementChangeKind;
   /** 기존 요구사항. added가 아니면 필수이며 modified는 이 identity를 유지한다. */
   requirementId?: string;
-  /** 새 분석 결과 문장. added·modified에서 사용한다. */
-  proposedText?: string;
+  /** added·modified에서 새 요구사항 내용 */
+  proposal?: RequirementProposal;
   feature: string;
+  /** 이번 분석의 근거. removed는 제거 판단의 근거로 분석 안에만 남고 기존 요구사항 근거를 덮어쓰지 않는다. */
   sourceRefs: SourceRef[];
   note?: string;
+  /** added·modified·removed에서만 사용 */
+  decision?: ReviewDecision;
 }
 
 export type TestImpactKind = 'create' | 'modify' | 'keep' | 'deprecate' | 'duplicate_candidate';
+/** 중복 후보는 수락/제외가 아니라 처리 방법을 고른다. */
+export type DuplicateResolution = 'pending' | 'modify_existing' | 'create_separate' | 'excluded';
+
+/** TC 설계 내용. 생성·수정 제안이 담는 필드이며 ID·상태·revision 같은 관리 필드는 뺀다. */
+export type TestCaseDesign = Pick<
+  TestCase,
+  'category' | 'feature' | 'depth' | 'title' | 'precondition' | 'steps' | 'expectedResult' | 'requirementIds' | 'testConditionIds' | 'sourceRefs' | 'generationType'
+>;
 
 export interface TestImpact {
   id: string;
@@ -219,12 +238,28 @@ export interface TestImpact {
   testCaseId?: string;
   requirementChangeIds: string[];
   testConditionIds: string[];
-  proposedTitle?: string;
-  proposedExpectedResult?: string;
+  /** create, 또는 중복 후보를 별도 신규 TC로 만들 때 쓰는 완전한 설계 */
+  newTestCase?: TestCaseDesign;
+  /** modify, 또는 중복 후보로 기존 TC를 수정할 때 바꿀 필드만 */
+  changes?: Partial<TestCaseDesign>;
   reason: string;
+  /** create·modify·deprecate에서만 사용 */
+  decision?: ReviewDecision;
+  /** duplicate_candidate에서만 사용 */
+  duplicateResolution?: DuplicateResolution;
 }
 
-export type ChangeAnalysisStatus = 'draft' | 'reviewed';
+export type ChangeAnalysisStatus = 'draft' | 'reviewed' | 'applied';
+
+/** 반영으로 실제 바뀐 요구사항·TC 수. 내용이 같아 바뀌지 않은 수정 제안은 세지 않는다. */
+export interface ChangeApplySummary {
+  requirementsAdded: number;
+  requirementsModified: number;
+  requirementsRemoved: number;
+  testCasesCreated: number;
+  testCasesModified: number;
+  testCasesDeprecated: number;
+}
 
 /** 하나의 분석 작업 단위. 어떤 산출물을 무엇과 비교했는지와 제안 결과를 함께 묶는다. */
 export interface ChangeAnalysis {
@@ -236,6 +271,10 @@ export interface ChangeAnalysis {
   baselineDeliverableId?: string;
   status: ChangeAnalysisStatus;
   createdAt: string;
+  reviewedAt?: string;
+  appliedAt?: string;
+  /** applied일 때 실제 반영 결과 */
+  appliedSummary?: ChangeApplySummary;
   requirementChanges: RequirementChange[];
   testImpacts: TestImpact[];
 }
@@ -311,7 +350,8 @@ export type ActivityType =
   | 'results_uploaded'
   | 'issue_created'
   | 'project_changed'
-  | 'knowledge_saved';
+  | 'knowledge_saved'
+  | 'changes_applied';
 
 export interface Activity {
   id: string;

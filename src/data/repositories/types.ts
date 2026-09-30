@@ -3,6 +3,7 @@ import type {
   CalendarEvent,
   ChangeAnalysis,
   Deliverable,
+  DuplicateResolution,
   DeliverableType,
   Issue,
   IssueStatus,
@@ -11,6 +12,7 @@ import type {
   Platform,
   Project,
   Requirement,
+  ReviewDecision,
   ScratchItem,
   ScratchLinkTarget,
   ScratchType,
@@ -151,9 +153,23 @@ export interface ScratchRepository {
   remove(id: string): Promise<void>;
 }
 
+/**
+ * 변경 영향 분석. 제안은 판단(draft) → 검토 완료(reviewed) → 반영(applied) 순서로만 실제 자산에 들어간다.
+ * 판단은 draft에서만 바꿀 수 있고, 반영은 reviewed에서 한 번만 할 수 있다.
+ */
 export interface ChangeAnalysisRepository {
-  /** 최신 분석부터 반환한다. 분석 결과는 제안이며 요구사항·TC를 바꾸지 않는다. */
+  /** 최신 분석부터 반환한다. */
   listByProject(projectId: string): Promise<ChangeAnalysis[]>;
+  /** added·modified·removed 요구사항 변경의 수락/제외 */
+  updateRequirementDecision(analysisId: string, changeId: string, decision: ReviewDecision): Promise<ChangeAnalysis>;
+  /** create·modify·deprecate TC 영향의 수락/제외 */
+  updateTestImpactDecision(analysisId: string, impactId: string, decision: ReviewDecision): Promise<ChangeAnalysis>;
+  /** 중복 후보 처리 방법 */
+  resolveDuplicate(analysisId: string, impactId: string, resolution: DuplicateResolution): Promise<ChangeAnalysis>;
+  /** 모든 판단이 끝난 draft를 reviewed로 바꾼다. 실제 자산은 아직 바뀌지 않는다. */
+  markReviewed(analysisId: string): Promise<ChangeAnalysis>;
+  /** reviewed 분석을 실제 요구사항·TC에 한 번에 반영한다. 하나라도 문제가 있으면 아무것도 바꾸지 않는다. */
+  apply(analysisId: string): Promise<ChangeAnalysis>;
 }
 
 export interface ActivityFilter {

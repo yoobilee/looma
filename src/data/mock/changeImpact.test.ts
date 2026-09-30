@@ -49,7 +49,7 @@ describe('요구사항 변경 제안', () => {
     const modified = analysis.requirementChanges.find((change) => change.kind === 'modified')!;
     const existing = requirements.find((item) => item.id === modified.requirementId);
     expect(existing?.id).toBe('req-002');
-    expect(modified.proposedText).not.toBe(existing?.text);
+    expect(modified.proposal?.text).not.toBe(existing?.text);
     expect(requirements).toEqual(requirementsBefore);
   });
 
@@ -67,11 +67,11 @@ describe('요구사항 변경 제안', () => {
     for (const change of analysis.requirementChanges) {
       if (change.kind === 'added') {
         expect(change.requirementId, change.id).toBeUndefined();
-        expect(change.proposedText, change.id).toBeTruthy();
+        expect(change.proposal?.text, change.id).toBeTruthy();
       } else {
         expect(ids.has(change.requirementId!), change.id).toBe(true);
       }
-      if (change.kind === 'modified') expect(change.proposedText, change.id).toBeTruthy();
+      if (change.kind === 'modified') expect(change.proposal?.text, change.id).toBeTruthy();
     }
   });
 });
@@ -82,7 +82,7 @@ describe('TC 영향 제안', () => {
     expect(testCases).toEqual(testCasesBefore);
     for (const impact of analysis.testImpacts.filter((item) => item.kind === 'modify')) {
       const testCase = testCases.find((item) => item.id === impact.testCaseId)!;
-      expect(testCase.title).not.toBe(impact.proposedTitle);
+      expect(testCase.title).not.toBe(impact.changes?.title);
       expect(testCase.revision).toBe(1);
     }
   });
@@ -96,11 +96,12 @@ describe('TC 영향 제안', () => {
       expect(impact.requirementChangeIds.length, impact.id).toBeGreaterThan(0);
       if (impact.kind === 'create') {
         expect(impact.testCaseId, impact.id).toBeUndefined();
-        expect(impact.proposedTitle, impact.id).toBeTruthy();
+        expect(impact.newTestCase?.title, impact.id).toBeTruthy();
       } else {
         expect(impact.testCaseId, impact.id).toBeTruthy();
       }
-      if (impact.kind === 'modify' || impact.kind === 'duplicate_candidate') expect(impact.proposedTitle, impact.id).toBeTruthy();
+      if (impact.kind === 'modify' || impact.kind === 'duplicate_candidate') expect(impact.changes?.title, impact.id).toBeTruthy();
+      if (impact.kind === 'duplicate_candidate') expect(impact.newTestCase?.title, impact.id).toBeTruthy();
     }
   });
 

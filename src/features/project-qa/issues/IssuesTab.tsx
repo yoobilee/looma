@@ -17,7 +17,7 @@ function IssueLinks({ issue, testCases, deliverables }: { issue: Issue; testCase
   const source = issue.sourceRef ? deliverables.find((item) => item.id === issue.sourceRef?.deliverableId) : undefined;
   const parts = [
     issue.feature && `기능 ${issue.feature}`,
-    testCase && `연결 TC ${testCase.externalId}`,
+    testCase && `연결 TC ${testCase.externalId ?? testCase.title}`,
     source && `근거 ${source.type === 'figma' ? 'Figma' : source.type.toUpperCase()} ${issue.sourceRef?.locator}`,
   ].filter(Boolean);
   return parts.length ? <p className={styles.links}>{parts.join(' · ')}</p> : null;
