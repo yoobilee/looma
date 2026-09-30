@@ -65,7 +65,8 @@ export function RequirementsTab() {
     if (!deliverable) return '출처 없음';
     return deliverable.type === 'figma' ? 'Figma' : deliverable.type === 'pdf' ? '기획서' : deliverable.title;
   };
-  const visible = requirements.filter((item) => (filter === 'changes' ? item.isChange : filter === 'confirm' ? item.needsConfirmation : true));
+  const sourceText = (item: Requirement) => item.sourceRefs.map((ref) => `${deliverableName(ref.deliverableId)} ${ref.locator}`).join(', ');
+  const visible = requirements.filter((item) => (filter === 'changes' ? item.lifecycle === 'changed' : filter === 'confirm' ? item.needsConfirmation : true));
   const features = [...new Set(visible.map((item) => item.feature))];
   const confirmItems = requirements.filter((item) => item.needsConfirmation);
   const alreadyAsked = (item: Requirement) => issues.some((issue) => issue.requirementId === item.id);
@@ -77,7 +78,7 @@ export function RequirementsTab() {
       title: item.text,
       feature: item.feature,
       requirementId: item.id,
-      note: `${deliverableName(item.deliverableId)} ${item.sourceLocator}`,
+      note: sourceText(item),
     });
 
   return (
@@ -99,7 +100,7 @@ export function RequirementsTab() {
           onChange={(value) => setSearchParams(value === 'all' ? {} : { filter: value }, { replace: true })}
           options={[
             { value: 'all', label: '전체', count: requirements.length },
-            { value: 'changes', label: '변경된 항목', count: requirements.filter((item) => item.isChange).length },
+            { value: 'changes', label: '변경된 항목', count: requirements.filter((item) => item.lifecycle === 'changed').length },
             { value: 'confirm', label: '확인 필요', count: confirmItems.length },
           ]}
         />
@@ -108,7 +109,7 @@ export function RequirementsTab() {
           {features.map((feature) => {
             const items = visible.filter((item) => item.feature === feature);
             const all = requirements.filter((item) => item.feature === feature);
-            const sources = [...new Set(all.map((item) => `${deliverableName(item.deliverableId)} ${item.sourceLocator}`))];
+            const sources = [...new Set(all.map((item) => sourceText(item)))];
             return (
               <details key={feature} className={styles.feature} open={filter !== 'all'}>
                 <summary className={styles.summary}>
@@ -117,7 +118,7 @@ export function RequirementsTab() {
                   <span className={styles.chips}>
                     <Tag tone="sky">요구사항 {all.length}</Tag>
                     {all.some((item) => item.needsConfirmation) && <Tag tone="coral">확인 필요 {all.filter((item) => item.needsConfirmation).length}</Tag>}
-                    {all.some((item) => item.isChange) && <Tag tone="outline">변경 {all.filter((item) => item.isChange).length}</Tag>}
+                    {all.some((item) => item.lifecycle === 'changed') && <Tag tone="outline">변경 {all.filter((item) => item.lifecycle === 'changed').length}</Tag>}
                   </span>
                   <span className={styles.expandHint} aria-hidden>
                     요구사항 보기 · 근거 확인
@@ -130,10 +131,10 @@ export function RequirementsTab() {
                       <div>
                         <p className={styles.requirementText}>
                           {item.text}
-                          {item.isChange && <span className={styles.changeMark}>변경</span>}
+                          {item.lifecycle === 'changed' && <span className={styles.changeMark}>변경</span>}
                         </p>
                         <p className={styles.locator}>
-                          근거 · {deliverableName(item.deliverableId)} {item.sourceLocator}
+                          근거 · {sourceText(item)}
                         </p>
                       </div>
                     </li>
@@ -153,7 +154,7 @@ export function RequirementsTab() {
               <li key={item.id} className={styles.confirmItem}>
                 <p className={styles.confirmText}>{item.text}</p>
                 <p className={styles.locator}>
-                  {deliverableName(item.deliverableId)} {item.sourceLocator}
+                  {sourceText(item)}
                 </p>
                 {alreadyAsked(item) ? (
                   <span className={styles.asked}>확인사항에 등록됨</span>

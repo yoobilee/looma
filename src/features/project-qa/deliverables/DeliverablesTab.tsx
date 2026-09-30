@@ -41,7 +41,7 @@ export function DeliverablesTab() {
   const recentCount = deliverables.filter((item) => now.getTime() - new Date(item.importedAt).getTime() < 3 * 24 * 3600 * 1000).length;
   const analyzedCount = deliverables.filter((item) => item.analyzedAt).length;
   const features = new Set(requirements.map((requirement) => requirement.feature));
-  const changeCount = requirements.filter((requirement) => requirement.isChange).length;
+  const changeCount = requirements.filter((requirement) => requirement.lifecycle === 'changed').length;
   const stageIndex = projectStageOrder.indexOf(project.currentStage);
 
   const stageDetail: Record<ProjectStage, string> = {
@@ -71,8 +71,8 @@ export function DeliverablesTab() {
           <ul className={styles.list}>
             {deliverables.map((deliverable) => {
               const action = nextActionFor(deliverable, projectPath, overview.hasTemplate);
-              const featureCount = new Set(requirements.filter((item) => item.deliverableId === deliverable.id).map((item) => item.feature)).size;
-              const confirmCount = requirements.filter((item) => item.deliverableId === deliverable.id && item.needsConfirmation).length;
+              const featureCount = new Set(requirements.filter((item) => item.sourceRefs.some((ref) => ref.deliverableId === deliverable.id)).map((item) => item.feature)).size;
+              const confirmCount = requirements.filter((item) => item.needsConfirmation && item.sourceRefs.some((ref) => ref.deliverableId === deliverable.id)).length;
               const meta = [
                 deliverable.version,
                 deliverable.summary,

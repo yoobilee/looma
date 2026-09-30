@@ -16,8 +16,8 @@ import styles from './TestDesignTab.module.css';
 type CaseFilter = 'all' | 'draft' | 'reviewed' | 'confirm' | 'duplicate';
 
 function matchesFilter(testCase: TestCase, filter: CaseFilter): boolean {
-  if (filter === 'draft') return testCase.reviewStatus === 'draft' && testCase.generationType !== 'needs_confirmation' && !testCase.duplicateOf;
-  if (filter === 'reviewed') return testCase.reviewStatus !== 'draft';
+  if (filter === 'draft') return testCase.status === 'draft' && testCase.generationType !== 'needs_confirmation' && !testCase.duplicateOf;
+  if (filter === 'reviewed') return testCase.status === 'reviewed' || testCase.status === 'active';
   if (filter === 'confirm') return testCase.generationType === 'needs_confirmation';
   if (filter === 'duplicate') return !!testCase.duplicateOf;
   return true;

@@ -31,7 +31,7 @@ export async function loadProjectOverview(repos: Repositories, project: Project)
     project,
     deliverableCount: deliverables.length,
     testCaseCount: testCases.length,
-    draftCount: testCases.filter((testCase) => testCase.reviewStatus === 'draft').length,
+    draftCount: testCases.filter((testCase) => testCase.status === 'draft').length,
     needsConfirmationCount: requirements.filter((requirement) => requirement.needsConfirmation).length,
     hasTemplate: !!project.tcTemplateId,
     latestImport,
