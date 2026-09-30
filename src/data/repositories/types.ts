@@ -29,6 +29,7 @@ import type {
   TestScope,
 } from '@/domain/types';
 import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/domain/testAssetImport';
+import type { ResultColumnMapping, ResultCycleInput, ResultImportRowDecision, ResultValueDecision } from '@/domain/testResultImport';
 
 // UI는 이 인터페이스만 사용한다.
 // 1차 구현은 data/mock의 메모리 구현을 쓰고, 이후 Supabase나 실제 연동 구현으로 교체한다.
@@ -120,9 +121,26 @@ export interface TestAssetImportRepository {
   apply(input: ApplyTestAssetImportInput): Promise<TestAssetImportSession>;
 }
 
+export interface ImportTestResultsInput {
+  projectId: string;
+  fileName: string;
+  table: ImportTable;
+  mapping: ResultColumnMapping;
+  cycle: ResultCycleInput;
+  rowDecisions: ResultImportRowDecision[];
+  /** 알 수 없는 결과 원문 키별 판단 */
+  valueDecisions: Record<string, ResultValueDecision>;
+}
+
 export interface TestResultRepository {
+  /** 차수 오름차순 */
   listImports(projectId: string): Promise<TestResultImport[]>;
   listResults(importId: string): Promise<TestResult[]>;
+  /**
+   * 수행 결과 파일을 새 차수로 가져온다. 현재 기준 TC · 템플릿 매핑으로 다시 분석해 미리보기와 같을 때만 한 번에 저장한다.
+   * 하나라도 문제가 있으면 차수 · 결과 · 활동을 모두 그대로 둔다. 기준 TC는 어떤 경우에도 바꾸지 않는다.
+   */
+  importResults(input: ImportTestResultsInput): Promise<TestResultImport>;
 }
 
 export interface CreateIssueInput {

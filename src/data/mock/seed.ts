@@ -616,6 +616,7 @@ export function createSeed() {
       fileRef: '고객사A_TC_수행결과_1차.xlsx',
       importedAt: at(-3, 18, 0),
       mapping: templates[0].resultMappings,
+      executionType: 'full',
     },
     {
       id: 'imp-a-2',
@@ -624,6 +625,7 @@ export function createSeed() {
       fileRef: '고객사A_TC_수행결과_2차.xlsx',
       importedAt: at(-1, 18, 30),
       mapping: templates[0].resultMappings,
+      executionType: 'full',
     },
   ];
 
