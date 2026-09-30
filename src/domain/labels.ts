@@ -1,12 +1,15 @@
 import type {
   ActivityType,
+  ChangeAnalysisStatus,
   DeliverableType,
   IssueStatus,
   IssueType,
   Platform,
   ProjectStage,
   ProjectStatus,
+  RequirementChangeKind,
   TestCaseStatus,
+  TestImpactKind,
   ScratchLinkTarget,
   ScratchType,
   SourceType,
@@ -111,6 +114,30 @@ export const testCaseStatusLabel: Record<TestCaseStatus, string> = {
   active: '사용 중',
   needs_review: '재검토 필요',
   deprecated: '폐기',
+};
+
+export const requirementChangeOrder: RequirementChangeKind[] = ['added', 'modified', 'removed', 'unchanged'];
+
+export const requirementChangeLabel: Record<RequirementChangeKind, string> = {
+  added: '신규',
+  modified: '변경',
+  removed: '제거 후보',
+  unchanged: '유지',
+};
+
+export const testImpactOrder: TestImpactKind[] = ['create', 'modify', 'keep', 'deprecate', 'duplicate_candidate'];
+
+export const testImpactLabel: Record<TestImpactKind, string> = {
+  create: '신규 TC 제안',
+  modify: '수정 제안',
+  keep: '유지',
+  deprecate: '폐기 후보',
+  duplicate_candidate: '중복 후보',
+};
+
+export const changeAnalysisStatusLabel: Record<ChangeAnalysisStatus, string> = {
+  draft: '검토 전 초안',
+  reviewed: '검토 완료',
 };
 
 export const testPerspectiveLabel: Record<TestPerspective, string> = {

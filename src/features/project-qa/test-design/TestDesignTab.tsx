@@ -9,17 +9,20 @@ import { FilterTabs } from '@/components/ui/FilterTabs';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
+import { ChangeImpactPanel } from './ChangeImpactPanel';
 import { TestCaseTable } from './TestCaseTable';
 import { TemplateSetupDialog, type TemplateSetupMode } from './TemplateSetupDialog';
 import styles from './TestDesignTab.module.css';
 
-type CaseFilter = 'all' | 'draft' | 'reviewed' | 'confirm' | 'duplicate';
+type CaseFilter = 'all' | 'draft' | 'reviewed' | 'confirm' | 'duplicate' | 'needs_review' | 'deprecated';
 
 function matchesFilter(testCase: TestCase, filter: CaseFilter): boolean {
   if (filter === 'draft') return testCase.status === 'draft' && testCase.generationType !== 'needs_confirmation' && !testCase.duplicateOf;
   if (filter === 'reviewed') return testCase.status === 'reviewed' || testCase.status === 'active';
-  if (filter === 'confirm') return testCase.generationType === 'needs_confirmation';
-  if (filter === 'duplicate') return !!testCase.duplicateOf;
+  if (filter === 'confirm') return testCase.generationType === 'needs_confirmation' && testCase.status !== 'deprecated';
+  if (filter === 'duplicate') return !!testCase.duplicateOf && testCase.status !== 'deprecated';
+  if (filter === 'needs_review') return testCase.status === 'needs_review';
+  if (filter === 'deprecated') return testCase.status === 'deprecated';
   return true;
 }
 
@@ -52,6 +55,8 @@ export function TestDesignTab() {
     reviewed: testCases.filter((item) => matchesFilter(item, 'reviewed')).length,
     confirm: testCases.filter((item) => matchesFilter(item, 'confirm')).length,
     duplicate: testCases.filter((item) => matchesFilter(item, 'duplicate')).length,
+    needs_review: testCases.filter((item) => matchesFilter(item, 'needs_review')).length,
+    deprecated: testCases.filter((item) => matchesFilter(item, 'deprecated')).length,
   };
   const visible = testCases.filter((item) => matchesFilter(item, filter));
   const hasDeliverables = deliverables.length > 0;
@@ -144,6 +149,8 @@ export function TestDesignTab() {
                   { value: 'reviewed', label: '검토 완료', count: counts.reviewed },
                   { value: 'confirm', label: '확인 필요', count: counts.confirm },
                   { value: 'duplicate', label: '중복 후보', count: counts.duplicate },
+                  { value: 'needs_review', label: '재검토 필요', count: counts.needs_review },
+                  { value: 'deprecated', label: '폐기', count: counts.deprecated },
                 ]}
               />
             </div>
@@ -152,17 +159,7 @@ export function TestDesignTab() {
         )}
       </section>
 
-      <section className={styles.changeBanner} aria-labelledby="change-banner-title">
-        <div>
-          <h2 id="change-banner-title" className={styles.bannerTitle}>
-            신규/변경 기능만 골라 TC를 다시 설계할 수 있어요.
-          </h2>
-          <p className={styles.bannerText}>기존 TC와 비교해 수정 후보 / 신규 후보 / 중복 후보를 분리합니다.</p>
-        </div>
-        <ButtonLink to={`/projects/${project.id}/requirements?filter=changes`} variant="primary">
-          변경 영향 기준으로 보기
-        </ButtonLink>
-      </section>
+      <ChangeImpactPanel projectId={project.id} testCases={testCases} deliverables={deliverables} />
 
       {setupMode && (
         <TemplateSetupDialog open mode={setupMode} project={project} currentTemplate={template} onClose={() => setSetupMode(null)} key={setupMode} />

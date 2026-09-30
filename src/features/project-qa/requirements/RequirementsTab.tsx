@@ -13,7 +13,7 @@ import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
 import styles from './RequirementsTab.module.css';
 
-type RequirementFilter = 'all' | 'changes' | 'confirm';
+type RequirementFilter = 'all' | 'changes' | 'confirm' | 'removed';
 
 export function RequirementsTab() {
   const { project, openDeliverableCreate } = useProjectContext();
@@ -66,9 +66,13 @@ export function RequirementsTab() {
     return deliverable.type === 'figma' ? 'Figma' : deliverable.type === 'pdf' ? '기획서' : deliverable.title;
   };
   const sourceText = (item: Requirement) => item.sourceRefs.map((ref) => `${deliverableName(ref.deliverableId)} ${ref.locator}`).join(', ');
-  const visible = requirements.filter((item) => (filter === 'changes' ? item.lifecycle === 'changed' : filter === 'confirm' ? item.needsConfirmation : true));
+  // 제거된 요구사항은 삭제하지 않고 이력으로 남기되, 기본 목록과 집계에서는 뺀다.
+  const current = requirements.filter((item) => item.lifecycle !== 'removed');
+  const removed = requirements.filter((item) => item.lifecycle === 'removed');
+  const scope = filter === 'removed' ? removed : current;
+  const visible = scope.filter((item) => (filter === 'changes' ? item.lifecycle === 'changed' : filter === 'confirm' ? item.needsConfirmation : true));
   const features = [...new Set(visible.map((item) => item.feature))];
-  const confirmItems = requirements.filter((item) => item.needsConfirmation);
+  const confirmItems = current.filter((item) => item.needsConfirmation);
   const alreadyAsked = (item: Requirement) => issues.some((issue) => issue.requirementId === item.id);
 
   const sendToQuestions = (item: Requirement) =>
@@ -87,7 +91,7 @@ export function RequirementsTab() {
         <SectionHeader
           id="features-title"
           title="분석된 기능"
-          meta={`기능 ${new Set(requirements.map((item) => item.feature)).size} · 확인 필요 ${confirmItems.length}`}
+          meta={`기능 ${new Set(current.map((item) => item.feature)).size} · 확인 필요 ${confirmItems.length}`}
         />
         <p className={styles.legend}>
           <SourceTypeTag sourceType="source_explicit" /> 산출물에 적힌 내용
@@ -99,16 +103,17 @@ export function RequirementsTab() {
           value={filter}
           onChange={(value) => setSearchParams(value === 'all' ? {} : { filter: value }, { replace: true })}
           options={[
-            { value: 'all', label: '전체', count: requirements.length },
-            { value: 'changes', label: '변경된 항목', count: requirements.filter((item) => item.lifecycle === 'changed').length },
+            { value: 'all', label: '전체', count: current.length },
+            { value: 'changes', label: '변경된 항목', count: current.filter((item) => item.lifecycle === 'changed').length },
             { value: 'confirm', label: '확인 필요', count: confirmItems.length },
+            { value: 'removed', label: '제거됨', count: removed.length },
           ]}
         />
 
         <div className={styles.features}>
           {features.map((feature) => {
             const items = visible.filter((item) => item.feature === feature);
-            const all = requirements.filter((item) => item.feature === feature);
+            const all = scope.filter((item) => item.feature === feature);
             const sources = [...new Set(all.map((item) => sourceText(item)))];
             return (
               <details key={feature} className={styles.feature} open={filter !== 'all'}>
@@ -126,12 +131,13 @@ export function RequirementsTab() {
                 </summary>
                 <ul className={styles.requirements}>
                   {items.map((item) => (
-                    <li key={item.id} className={styles.requirement}>
+                    <li key={item.id} className={`${styles.requirement} ${item.lifecycle === 'removed' ? styles.removed : ''}`}>
                       <SourceTypeTag sourceType={item.sourceType} />
                       <div>
                         <p className={styles.requirementText}>
-                          {item.text}
+                          <span className={styles.requirementBody}>{item.text}</span>
                           {item.lifecycle === 'changed' && <span className={styles.changeMark}>변경</span>}
+                          {item.lifecycle === 'removed' && <span className={styles.removedMark}>제거됨</span>}
                         </p>
                         <p className={styles.locator}>
                           근거 · {sourceText(item)}

@@ -1,6 +1,7 @@
 import type {
   Activity,
   CalendarEvent,
+  ChangeAnalysis,
   Deliverable,
   Issue,
   KnowledgeTerm,
@@ -202,6 +203,18 @@ export function createSeed() {
       analyzedAt: at(-1, 11, 0),
     },
     {
+      id: 'dlv-plan-pdf-v15',
+      projectId: PROJECT_A,
+      type: 'pdf',
+      title: '모바일_개편_기획_v1.5.pdf',
+      fileRef: 'mock://모바일_개편_기획_v1.5.pdf',
+      version: 'v1.5',
+      previousRevisionId: 'dlv-plan-pdf',
+      summary: '40쪽 · 변경 영향 분석 초안',
+      importedAt: at(-1, 19, 0),
+      analyzedAt: at(-1, 19, 20),
+    },
+    {
       id: 'dlv-figma-auth',
       projectId: PROJECT_A,
       type: 'figma',
@@ -292,6 +305,8 @@ export function createSeed() {
     requirement('req-010', '비밀번호 재설정', '가입한 이메일로 재설정 링크를 보낸다.', 'dlv-plan-pdf', 'p.25', 'source_explicit'),
     requirement('req-011', '비밀번호 재설정', '재설정 링크 만료 시간 경과 후 접근 시 동작 확인을 제안', 'dlv-plan-pdf', 'p.27', 'ai_suggestion'),
     requirement('req-012', '비밀번호 재설정', '이전과 같은 비밀번호로 변경 가능한지 명시 필요', 'dlv-figma-auth', '재설정 Frame 1', 'needs_confirmation'),
+    // 이전 revision에서 이미 빠진 요구사항. 삭제하지 않고 이력으로 남긴다.
+    { ...requirement('req-013', '회원가입', '가입 완료 후 SNS 계정 연동 안내 팝업을 노출한다.', 'dlv-plan-pdf', 'p.17', 'source_explicit'), lifecycle: 'removed' },
   ];
 
   const templates: TCTemplate[] = [
@@ -408,6 +423,100 @@ export function createSeed() {
     'tc-015': { requirementIds: ['req-012'], testConditionIds: [] },
   };
   for (const item of testCases) Object.assign(item, testCaseTrace[item.id]);
+
+  // 화면에서 재검토·폐기 상태를 확인하기 위한 예시. 변경 영향 분석 제안과는 별개로 이미 반영된 상태다.
+  const statusOverrides: Record<string, TestCase['status']> = { 'tc-009': 'needs_review', 'tc-012': 'deprecated' };
+  for (const item of testCases) item.status = statusOverrides[item.id] ?? item.status;
+
+  // 기획서 v1.4 → v1.5 변경 영향 분석 초안. 요구사항·TC는 그대로 두고 제안만 기록한다.
+  const v15 = (locator: string) => [{ deliverableId: 'dlv-plan-pdf-v15', locator }];
+  const changeAnalyses: ChangeAnalysis[] = [
+    {
+      id: 'cia-plan-v15',
+      projectId: PROJECT_A,
+      targetDeliverableId: 'dlv-plan-pdf-v15',
+      baselineDeliverableId: 'dlv-plan-pdf',
+      status: 'draft',
+      createdAt: at(-1, 19, 20),
+      requirementChanges: [
+        { id: 'rc-001', kind: 'added', feature: '회원가입', proposedText: '카카오 계정으로 간편 가입할 수 있다.', sourceRefs: v15('p.11') },
+        {
+          id: 'rc-002',
+          kind: 'modified',
+          requirementId: 'req-002',
+          feature: '회원가입',
+          proposedText: '비밀번호는 영문, 숫자, 특수문자를 포함해 10자 이상이어야 한다.',
+          sourceRefs: v15('p.14'),
+        },
+        { id: 'rc-003', kind: 'removed', requirementId: 'req-003', feature: '회원가입', sourceRefs: v15('p.15'), note: 'v1.5에서 중복 이메일 안내 문구가 빠짐 — 이메일 인증 단계로 대체됐는지 확인 필요' },
+        { id: 'rc-004', kind: 'unchanged', requirementId: 'req-001', feature: '회원가입', sourceRefs: v15('p.10') },
+      ],
+      testImpacts: [
+        {
+          id: 'ti-001',
+          kind: 'create',
+          requirementChangeIds: ['rc-001'],
+          testConditionIds: [],
+          proposedTitle: '카카오 계정으로 간편 가입 시 가입 완료',
+          proposedExpectedResult: '가입 완료 화면 노출',
+          reason: '신규 요구사항을 검증할 TC가 없음',
+        },
+        {
+          id: 'ti-002',
+          kind: 'create',
+          requirementChangeIds: ['rc-002'],
+          testConditionIds: ['cond-003'],
+          proposedTitle: '특수문자 미포함 시 오류 노출',
+          proposedExpectedResult: '"영문, 숫자, 특수문자를 포함" 안내 노출',
+          reason: '변경된 구성 규칙에 특수문자 조건이 추가됨',
+        },
+        {
+          id: 'ti-003',
+          kind: 'modify',
+          testCaseId: 'tc-002',
+          requirementChangeIds: ['rc-002'],
+          testConditionIds: ['cond-002'],
+          proposedTitle: '최소 길이 10자 입력',
+          reason: '최소 길이가 8자에서 10자로 바뀜',
+        },
+        {
+          id: 'ti-004',
+          kind: 'modify',
+          testCaseId: 'tc-003',
+          requirementChangeIds: ['rc-002'],
+          testConditionIds: ['cond-002'],
+          proposedTitle: '9자 입력 시 오류 노출',
+          proposedExpectedResult: '"10자 이상 입력" 안내 노출',
+          reason: '경계값이 7자에서 9자로 바뀜',
+        },
+        {
+          id: 'ti-005',
+          kind: 'keep',
+          testCaseId: 'tc-004',
+          requirementChangeIds: ['rc-002'],
+          testConditionIds: ['cond-003'],
+          reason: '영문 미포함 오류는 바뀐 규칙에서도 그대로 유효함',
+        },
+        {
+          id: 'ti-006',
+          kind: 'deprecate',
+          testCaseId: 'tc-005',
+          requirementChangeIds: ['rc-003'],
+          testConditionIds: ['cond-004'],
+          reason: '근거 요구사항이 v1.5에서 제거 후보가 됨',
+        },
+        {
+          id: 'ti-007',
+          kind: 'duplicate_candidate',
+          testCaseId: 'tc-001',
+          requirementChangeIds: ['rc-002'],
+          testConditionIds: ['cond-001'],
+          proposedTitle: '바뀐 규칙에 맞는 비밀번호로 가입 완료',
+          reason: '기존 SIGN-001과 검증 내용이 같아 신규 대신 수정할지 결정 필요',
+        },
+      ],
+    },
+  ];
 
   // 고객사 Excel에서 수행한 결과 파일을 가져왔다고 가정한 데이터.
   // 외부 파일에는 Looma에서 만들지 않은 기존 TC도 함께 들어 있다.
@@ -766,6 +875,7 @@ export function createSeed() {
     templates,
     testConditions,
     testCases,
+    changeAnalyses,
     resultImports,
     results,
     issues,

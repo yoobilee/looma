@@ -1,6 +1,7 @@
 import type {
   Activity,
   CalendarEvent,
+  ChangeAnalysis,
   Deliverable,
   DeliverableType,
   Issue,
@@ -150,6 +151,11 @@ export interface ScratchRepository {
   remove(id: string): Promise<void>;
 }
 
+export interface ChangeAnalysisRepository {
+  /** 최신 분석부터 반환한다. 분석 결과는 제안이며 요구사항·TC를 바꾸지 않는다. */
+  listByProject(projectId: string): Promise<ChangeAnalysis[]>;
+}
+
 export interface ActivityFilter {
   projectId?: string;
 }
@@ -176,6 +182,7 @@ export interface Repositories {
   issues: IssueRepository;
   knowledge: KnowledgeRepository;
   scratch: ScratchRepository;
+  changeAnalyses: ChangeAnalysisRepository;
   activities: ActivityRepository;
   calendar: CalendarRepository;
   /** 데이터가 바뀌면 호출된다. 반환 함수로 구독을 해제한다. */

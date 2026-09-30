@@ -106,8 +106,19 @@
 }
 
 .confirm,
-.duplicate {
+.duplicate,
+.needsReview {
   color: var(--color-coral-strong);
+}
+
+.deprecated {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
+/* 폐기된 TC는 목록에 남기되 한 단계 낮춰 보여준다. */
+.deprecatedRow .titleButton {
+  color: var(--color-muted);
 }
 
 .detailRow td {

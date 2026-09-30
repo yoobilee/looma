@@ -112,6 +112,22 @@
   font-weight: 700;
 }
 
+/* 제거된 요구사항: 삭제하지 않고 이력으로 보여주되 현재 항목과 구분한다. */
+.removedMark {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: 6px;
+  color: var(--color-muted);
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.removed .requirementBody {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
 .locator {
   margin-top: 2px;
   font: var(--text-caption);
