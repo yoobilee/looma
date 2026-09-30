@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { repositories } from '@/data';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
-import { pendingDecisionCount, planChangeApplication, summarizeChangeAnalysis } from '@/domain/changeImpact';
+import { decisionConflictMessage, decisionConflicts, pendingDecisionCount, planChangeApplication, summarizeChangeAnalysis } from '@/domain/changeImpact';
 import {
   changeAnalysisStatusLabel,
   duplicateResolutionLabel,
@@ -193,7 +193,32 @@ export function ChangeImpactPanel({ projectId, testCases, deliverables }: Change
     const testCase = testCases.find((item) => item.id === id);
     return testCase ? `${testCase.externalId ?? '고객사 ID 미지정'} ${testCase.title}` : undefined;
   };
-  const proposedTitle = (impact: TestImpact) => impact.changes?.title ?? impact.newTestCase?.title;
+  const conflicts = decisionConflicts(analysis);
+  const conflictByImpact = new Map(conflicts.map((conflict) => [conflict.impactId, conflict]));
+
+  /** 항목 제목. 중복 후보는 고른 처리 방법에 맞는 제안만 보여 준다. 반영 후에는 기존 TC 제목이 이미 바뀌어 화살표를 뺀다. */
+  const impactHeadline = (impact: TestImpact): { title?: string; proposal?: string; note?: string } => {
+    const existing = testCaseLabel(impact.testCaseId);
+    const showProposal = analysis.status !== 'applied';
+    if (impact.kind === 'create') return { title: impact.newTestCase?.title };
+    if (impact.kind === 'modify') return { title: existing, proposal: showProposal ? impact.changes?.title : undefined };
+    if (impact.kind !== 'duplicate_candidate') return { title: existing };
+    switch (impact.duplicateResolution) {
+      case 'modify_existing':
+        return { title: existing, proposal: showProposal ? impact.changes?.title : undefined };
+      case 'create_separate':
+        // 비교 대상 TC는 아래 "비교 대상 TC" 행에 이미 표시된다.
+        return { title: impact.newTestCase?.title, note: '별도 신규 TC로 만들어요. 비교 대상 TC는 그대로 둬요.' };
+      case 'excluded':
+        return { title: existing, note: '이 제안은 반영하지 않아요.' };
+      default: {
+        const modifyTitle = impact.changes?.title;
+        const createTitle = impact.newTestCase?.title;
+        const note = modifyTitle === createTitle ? `제안 · ${modifyTitle}` : `수정 제안 · ${modifyTitle} / 신규 제안 · ${createTitle}`;
+        return { title: existing, note };
+      }
+    }
+  };
 
   const caption =
     analysis.status === 'draft'
@@ -291,16 +316,28 @@ export function ChangeImpactPanel({ projectId, testCases, deliverables }: Change
             const linkedRequirements = analysis.requirementChanges.filter((change) => impact.requirementChangeIds.includes(change.id));
             const linkedConditions = conditions.filter((item) => impact.testConditionIds.includes(item.id));
             const existing = testCaseLabel(impact.testCaseId);
-            const proposal = proposedTitle(impact);
+            const headline = impactHeadline(impact);
+            const conflict = isDraft ? conflictByImpact.get(impact.id) : undefined;
             return (
               <li key={impact.id} className={styles.item}>
                 <Tag tone={impactTone[impact.kind]}>{testImpactLabel[impact.kind]}</Tag>
                 <div className={styles.itemBody}>
                   <p className={styles.itemTitle}>
-                    {impact.kind === 'create' ? impact.newTestCase?.title : existing}
-                    {impact.kind !== 'create' && proposal && analysis.status !== 'applied' && <span className={styles.proposal}> → {proposal}</span>}
+                    {headline.title}
+                    {headline.proposal && <span className={styles.proposal}> → {headline.proposal}</span>}
                   </p>
+                  {headline.note && <p className={styles.itemMeta}>{headline.note}</p>}
                   <p className={styles.itemMeta}>{impact.reason}</p>
+                  {conflict && (
+                    <p className={styles.conflictNote}>
+                      근거 요구사항{' '}
+                      {analysis.requirementChanges
+                        .filter((change) => conflict.rejectedChangeIds.includes(change.id))
+                        .map((change) => `"${requirementChangeLabel[change.kind]} · ${requirementText(change)}"`)
+                        .join(', ')}
+                      을(를) 제외했어요. 이 제안도 제외하거나 요구사항 판단을 수락으로 바꿔 주세요.
+                    </p>
+                  )}
                   <dl className={styles.links}>
                     {linkedRequirements.length > 0 && (
                       <div>
@@ -367,10 +404,18 @@ export function ChangeImpactPanel({ projectId, testCases, deliverables }: Change
       <div className={styles.actionBar}>
         {analysis.status === 'draft' && (
           <>
-            <p className={pending > 0 ? styles.pendingNote : styles.readyNote} aria-live="polite">
-              {pending > 0 ? `판단이 필요한 항목 ${pending}건` : '모든 항목을 판단했어요.'}
+            <p className={pending > 0 || conflicts.length > 0 ? styles.pendingNote : styles.readyNote} aria-live="polite">
+              {pending > 0
+                ? `판단이 필요한 항목 ${pending}건`
+                : conflicts.length > 0
+                  ? `${decisionConflictMessage(conflicts.length)} 표시된 항목의 판단을 맞춰 주세요.`
+                  : '모든 항목을 판단했어요.'}
             </p>
-            <Button variant="primary" disabled={pending > 0 || busy} onClick={() => void run(() => repositories.changeAnalyses.markReviewed(analysis.id))}>
+            <Button
+              variant="primary"
+              disabled={pending > 0 || conflicts.length > 0 || busy}
+              onClick={() => void run(() => repositories.changeAnalyses.markReviewed(analysis.id))}
+            >
               검토 완료
             </Button>
           </>

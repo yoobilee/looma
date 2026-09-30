@@ -158,6 +158,18 @@
   color: var(--color-coral-strong);
 }
 
+/* 판단 조합 모순: 어느 판단을 맞춰야 하는지 항목 옆에 보여 준다. */
+.conflictNote {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-coral);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--color-coral-soft);
+  color: var(--color-coral-strong);
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
 .statusRow {
   display: flex;
   flex-wrap: wrap;

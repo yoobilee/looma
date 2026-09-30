@@ -1,6 +1,13 @@
 import type { Activity, ActivityType, ScratchItem } from '@/domain/types';
 import { testCaseStatusLabel } from '@/domain/labels';
-import { pendingDecisionCount, planChangeApplication, requirementChangeNeedsDecision, testImpactNeedsDecision } from '@/domain/changeImpact';
+import {
+  decisionConflictMessage,
+  decisionConflicts,
+  pendingDecisionCount,
+  planChangeApplication,
+  requirementChangeNeedsDecision,
+  testImpactNeedsDecision,
+} from '@/domain/changeImpact';
 import type { Repositories } from '../repositories/types';
 import { createSeed, type SeedData } from './seed';
 
@@ -202,6 +209,8 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
         const analysis = draftAnalysis(analysisId);
         const pending = pendingDecisionCount(analysis);
         if (pending > 0) throw new Error(`판단하지 않은 항목이 ${pending}건 있어요.`);
+        const conflicts = decisionConflicts(analysis);
+        if (conflicts.length > 0) throw new Error(decisionConflictMessage(conflicts.length));
         analysis.status = 'reviewed';
         analysis.reviewedAt = nowIso();
         emit();

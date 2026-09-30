@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { pendingDecisionCount } from '@/domain/changeImpact';
+import { describe, expect, it, vi } from 'vitest';
+import { decisionConflicts, pendingDecisionCount, planChangeApplication } from '@/domain/changeImpact';
 import type { DuplicateResolution, ReviewDecision } from '@/domain/types';
 import { createMockRepositories } from './mockRepositories';
 import { createSeed, PROJECT_A, type SeedData } from './seed';
@@ -160,7 +160,12 @@ describe('요구사항 반영', () => {
   });
 
   it('rejected·unchanged → 요구사항에 아무 변화가 없다', async () => {
-    const { repos, before, load } = await setup({ requirements: { 'rc-001': 'rejected', 'rc-002': 'rejected', 'rc-003': 'rejected' } });
+    // 요구사항 변경을 모두 제외하면 그 변경을 근거로 한 TC 제안도 함께 제외해야 검토를 완료할 수 있다.
+    const { repos, before, load } = await setup({
+      requirements: { 'rc-001': 'rejected', 'rc-002': 'rejected', 'rc-003': 'rejected' },
+      impacts: { 'ti-001': 'rejected', 'ti-002': 'rejected', 'ti-003': 'rejected', 'ti-004': 'rejected', 'ti-006': 'rejected' },
+      duplicate: 'excluded',
+    });
     await repos.changeAnalyses.apply(ANALYSIS);
     expect((await load()).requirements).toEqual(before.requirements);
   });
@@ -301,5 +306,125 @@ describe('회귀', () => {
       expect(linked).toHaveLength(30);
       for (const result of linked) expect(byId.get(result.testCaseId!)?.externalId).toBe(result.externalId);
     }
+  });
+});
+
+describe('판단 조합 모순', () => {
+  // 연결: ti-001 → rc-001(added) / ti-002·003·004·005(keep)·007(중복) → rc-002(modified) / ti-006 → rc-003(removed)
+  it('added 제외 + 이를 근거로 한 신규 TC 수락 → 검토 완료 불가', async () => {
+    const { repos, load } = await setup();
+    await decideAll(repos, { requirements: { 'rc-001': 'rejected' } });
+    expect(decisionConflicts((await load()).analysis)).toEqual([{ impactId: 'ti-001', rejectedChangeIds: ['rc-001'] }]);
+    await expect(repos.changeAnalyses.markReviewed(ANALYSIS)).rejects.toThrow('제외한 요구사항을 근거로 수락된 TC 제안이 1건');
+    expect((await load()).analysis.status).toBe('draft');
+  });
+
+  it('modified 제외 + 이를 근거로 한 수정 제안 수락 → 검토 완료 불가', async () => {
+    const { repos, load } = await setup();
+    await decideAll(repos, {
+      requirements: { 'rc-002': 'rejected' },
+      impacts: { 'ti-002': 'rejected', 'ti-003': 'accepted', 'ti-004': 'rejected' },
+      duplicate: 'excluded',
+    });
+    expect(decisionConflicts((await load()).analysis).map((item) => item.impactId)).toEqual(['ti-003']);
+    await expect(repos.changeAnalyses.markReviewed(ANALYSIS)).rejects.toThrow('1건');
+  });
+
+  it('removed 제외 + 이를 근거로 한 폐기 제안 수락 → 검토 완료 불가', async () => {
+    const { repos, load } = await setup();
+    await decideAll(repos, { requirements: { 'rc-003': 'rejected' } });
+    expect(decisionConflicts((await load()).analysis).map((item) => item.impactId)).toEqual(['ti-006']);
+    await expect(repos.changeAnalyses.markReviewed(ANALYSIS)).rejects.toThrow('제외한 요구사항');
+  });
+
+  it('근거 요구사항과 TC 제안을 함께 제외하면 검토 완료할 수 있다', async () => {
+    const { repos, load } = await setup();
+    await decideAll(repos, { requirements: { 'rc-001': 'rejected' }, impacts: { 'ti-001': 'rejected' } });
+    expect(decisionConflicts((await load()).analysis)).toEqual([]);
+    await repos.changeAnalyses.markReviewed(ANALYSIS);
+    expect((await load()).analysis.status).toBe('reviewed');
+  });
+
+  it.each(['modify_existing', 'create_separate'] as const)('중복 후보 %s도 제외된 요구사항을 근거로 하면 검토 완료 불가', async (duplicate) => {
+    const { repos, load } = await setup();
+    await decideAll(repos, {
+      requirements: { 'rc-002': 'rejected' },
+      impacts: { 'ti-002': 'rejected', 'ti-003': 'rejected', 'ti-004': 'rejected' },
+      duplicate,
+    });
+    expect(decisionConflicts((await load()).analysis).map((item) => item.impactId)).toEqual(['ti-007']);
+    await expect(repos.changeAnalyses.markReviewed(ANALYSIS)).rejects.toThrow('1건');
+  });
+
+  it('중복 후보를 제외하고 keep만 남으면 제외된 요구사항과 무관하다', async () => {
+    const { repos, load } = await setup();
+    await decideAll(repos, {
+      requirements: { 'rc-002': 'rejected' },
+      impacts: { 'ti-002': 'rejected', 'ti-003': 'rejected', 'ti-004': 'rejected' },
+      duplicate: 'excluded',
+    });
+    expect(decisionConflicts((await load()).analysis)).toEqual([]);
+    await repos.changeAnalyses.markReviewed(ANALYSIS);
+    expect((await load()).analysis.status).toBe('reviewed');
+  });
+
+  it('정상 판단 조합은 모순이 없고 검토 완료할 수 있다', async () => {
+    const { repos, load } = await setup();
+    await decideAll(repos);
+    expect(decisionConflicts((await load()).analysis)).toEqual([]);
+    await repos.changeAnalyses.markReviewed(ANALYSIS);
+    expect((await load()).analysis.status).toBe('reviewed');
+  });
+});
+
+/** seed 분석에 판단을 직접 채워 reviewed 상태로 만든다. 저장소 검증을 거치지 않은 입력을 흉내 낸다. */
+function reviewedSeedAnalysis(seed: SeedData, duplicate: DuplicateResolution, rejectedChangeIds: string[] = []) {
+  const analysis = seed.changeAnalyses[0];
+  for (const change of analysis.requirementChanges) {
+    if (change.kind !== 'unchanged') change.decision = rejectedChangeIds.includes(change.id) ? 'rejected' : 'accepted';
+  }
+  for (const impact of analysis.testImpacts) if (impact.kind !== 'keep' && impact.kind !== 'duplicate_candidate') impact.decision = 'accepted';
+  analysis.testImpacts.find((item) => item.id === 'ti-007')!.duplicateResolution = duplicate;
+  analysis.status = 'reviewed';
+  return analysis;
+}
+
+describe('planChangeApplication 방어 검증과 ID 할당', () => {
+  it('모순된 판단이 reviewed로 들어와도 반영을 거부하고 ID를 만들지 않는다', () => {
+    const seed = createSeed();
+    const analysis = reviewedSeedAnalysis(seed, 'excluded', ['rc-001']);
+    const createId = vi.fn((prefix: string) => `${prefix}-new`);
+    expect(() => planChangeApplication(analysis, seed, { now: 'now', createId })).toThrow('제외한 요구사항을 근거로 수락된 TC 제안이 1건');
+    expect(createId).not.toHaveBeenCalled();
+  });
+
+  it('뒤쪽 참조 검증이 실패해도 ID를 하나도 만들지 않는다', () => {
+    const seed = createSeed();
+    const analysis = reviewedSeedAnalysis(seed, 'create_separate');
+    analysis.testImpacts.find((item) => item.id === 'ti-006')!.testCaseId = 'tc-missing';
+    const createId = vi.fn((prefix: string) => `${prefix}-new`);
+    expect(() => planChangeApplication(analysis, seed, { now: 'now', createId })).toThrow('대상 TC를 찾을 수 없어요');
+    expect(createId).not.toHaveBeenCalled();
+  });
+
+  it('draft 분석은 ID를 만들지 않고 거부한다', () => {
+    const seed = createSeed();
+    const createId = vi.fn((prefix: string) => `${prefix}-new`);
+    expect(() => planChangeApplication(seed.changeAnalyses[0], seed, { now: 'now', createId })).toThrow('검토를 완료한 분석만');
+    expect(createId).not.toHaveBeenCalled();
+  });
+
+  it('정상 반영에서는 새 요구사항·TC 수만큼만 ID를 만든다', () => {
+    const seed = createSeed();
+    const analysis = reviewedSeedAnalysis(seed, 'create_separate');
+    let counter = 0;
+    const createId = vi.fn((prefix: string) => `${prefix}-new-${(counter += 1)}`);
+    const plan = planChangeApplication(analysis, seed, { now: 'now', createId, templateId: 'tpl-client-a' });
+    // 요구사항 신규 1(rc-001), TC 신규 3(ti-001, ti-002, 중복 후보 별도 신규)
+    expect(createId.mock.calls.map(([prefix]) => prefix)).toEqual(['req', 'tc', 'tc', 'tc']);
+    expect(plan.summary).toMatchObject({ requirementsAdded: 1, testCasesCreated: 3 });
+    const created = plan.testCases.filter((item) => item.id.startsWith('tc-new-'));
+    expect(created.map((item) => item.id)).toEqual(['tc-new-2', 'tc-new-3', 'tc-new-4']);
+    expect(created[0].requirementIds).toEqual(['req-new-1']);
   });
 });
