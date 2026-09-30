@@ -1,5 +1,7 @@
 .page {
   display: grid;
+  /* 암묵적 열은 내용의 최소 너비까지 늘어나 좁은 화면에서 페이지 전체를 밀어낸다. 열을 부모 너비에 묶는다. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 40px;
 }
 
