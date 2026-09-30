@@ -38,6 +38,12 @@ export const PROJECT_B = 'proj-client-b-admin';
 export const PROJECT_C = 'proj-internal-tools';
 
 export function createSeed() {
+  // 이미 일어난 오늘 활동은 고정 시각(at) 대신 상대 시각으로 만든다.
+  // 고정 시각은 이른 아침(예: UTC 기준 CI)에 현재보다 미래가 되어 최근 활동 순서를 깨뜨린다.
+  const memoCreatedAt = minutesAgo(144);
+  const accessCompletedAt = minutesAgo(96);
+  const envPinnedAt = minutesAgo(60);
+
   const projects: Project[] = [
     {
       id: PROJECT_A,
@@ -178,7 +184,7 @@ export function createSeed() {
       tags: ['온보딩'],
       repeat: 'none',
       createdAt: at(-1, 17, 0),
-      completedAt: at(0, 10, 6),
+      completedAt: accessCompletedAt,
     },
   ];
 
@@ -678,16 +684,16 @@ export function createSeed() {
       type: 'url',
       title: '테스트 환경 주소',
       content: 'https://qa.example.local',
-      createdAt: at(0, 10, 30),
-      pinnedAt: at(0, 10, 42),
+      createdAt: minutesAgo(72),
+      pinnedAt: envPinnedAt,
       linkedType: 'record',
     },
   ];
 
   const activities: Activity[] = [
-    { id: 'act-1', type: 'memo_created', title: '온보딩 안내 메모 작성', metadata: { detail: '메모' }, createdAt: at(0, 9, 18) },
-    { id: 'act-2', type: 'task_completed', taskId: 'task-access', title: '접근 권한 요청 완료', metadata: { detail: '온보딩 업무' }, createdAt: at(0, 10, 6) },
-    { id: 'act-3', type: 'scratch_pinned', title: '테스트 환경 주소를 기록에 고정', metadata: { detail: '임시 작업공간 → 기록' }, createdAt: at(0, 10, 42) },
+    { id: 'act-1', type: 'memo_created', title: '온보딩 안내 메모 작성', metadata: { detail: '메모' }, createdAt: memoCreatedAt },
+    { id: 'act-2', type: 'task_completed', taskId: 'task-access', title: '접근 권한 요청 완료', metadata: { detail: '온보딩 업무' }, createdAt: accessCompletedAt },
+    { id: 'act-3', type: 'scratch_pinned', title: '테스트 환경 주소를 기록에 고정', metadata: { detail: '임시 작업공간 → 기록' }, createdAt: envPinnedAt },
     { id: 'act-4', type: 'task_started', taskId: 'task-env-setup', projectId: PROJECT_A, title: '테스트 환경과 업무 도구 정리 시작', metadata: { detail: '업무 시작' }, createdAt: minutesAgo(26) },
     { id: 'act-5', type: 'memo_created', projectId: PROJECT_A, title: '알림 설정 확인 메모 추가', metadata: { detail: '현재 업무와 연결됨' }, createdAt: minutesAgo(20) },
     { id: 'act-6', type: 'results_uploaded', projectId: PROJECT_A, title: '2차 수행 결과 업로드', metadata: { detail: '고객사A_TC_수행결과_2차.xlsx' }, createdAt: at(-1, 18, 30) },
