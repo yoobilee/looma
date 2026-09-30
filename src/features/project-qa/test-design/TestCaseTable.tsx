@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { repositories } from '@/data';
-import { generationTypeLabel, reviewStatusLabel, testPerspectiveLabel } from '@/domain/labels';
+import { generationTypeLabel, testCaseStatusLabel, testPerspectiveLabel } from '@/domain/labels';
 import type { Deliverable, TestCase } from '@/domain/types';
 import { SourceTypeTag } from '@/components/ui/Tag';
 import styles from './TestCaseTable.module.css';
@@ -23,7 +23,7 @@ function sourceLabel(testCase: TestCase, deliverables: Deliverable[]): string {
 function statusText(testCase: TestCase): { label: string; tone: 'reviewed' | 'draft' | 'confirm' | 'duplicate' } {
   if (testCase.duplicateOf) return { label: '중복 후보', tone: 'duplicate' };
   if (testCase.generationType === 'needs_confirmation') return { label: '확인 필요', tone: 'confirm' };
-  return { label: reviewStatusLabel[testCase.reviewStatus], tone: testCase.reviewStatus === 'draft' ? 'draft' : 'reviewed' };
+  return { label: testCaseStatusLabel[testCase.status], tone: testCase.status === 'draft' ? 'draft' : 'reviewed' };
 }
 
 /** TC 초안 표. 행을 펼치면 사전 조건·절차·기대 결과와 검토 동작이 보인다. */
@@ -110,21 +110,21 @@ export function TestCaseTable({ testCases, deliverables }: TestCaseTableProps) {
                           </div>
                         </dl>
                         <div className={styles.detailActions}>
-                          {testCase.reviewStatus === 'draft' ? (
+                          {testCase.status === 'draft' ? (
                             <button
                               type="button"
                               className={styles.reviewButton}
                               disabled={testCase.generationType === 'needs_confirmation' || !!testCase.duplicateOf}
-                              onClick={() => void repositories.testCases.updateReviewStatus(testCase.id, 'reviewed')}
+                              onClick={() => void repositories.testCases.updateStatus(testCase.id, 'reviewed')}
                             >
                               검토 완료로 표시
                             </button>
                           ) : (
-                            <button type="button" className={styles.revertButton} onClick={() => void repositories.testCases.updateReviewStatus(testCase.id, 'draft')}>
+                            <button type="button" className={styles.revertButton} onClick={() => void repositories.testCases.updateStatus(testCase.id, 'draft')}>
                               초안으로 되돌리기
                             </button>
                           )}
-                          {(testCase.generationType === 'needs_confirmation' || testCase.duplicateOf) && testCase.reviewStatus === 'draft' && (
+                          {(testCase.generationType === 'needs_confirmation' || testCase.duplicateOf) && testCase.status === 'draft' && (
                             <p className={styles.blockedNote}>
                               {testCase.duplicateOf ? '기존 TC와 비교해 신규 / 수정 / 제외를 먼저 정해 주세요.' : '확인사항이 답변되면 검토할 수 있어요.'}
                             </p>

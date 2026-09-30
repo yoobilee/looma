@@ -1,4 +1,5 @@
 import type { Activity, ActivityType, ScratchItem } from '@/domain/types';
+import { testCaseStatusLabel } from '@/domain/labels';
 import type { Repositories } from '../repositories/types';
 import { createSeed, type SeedData } from './seed';
 
@@ -121,6 +122,13 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
         return db.deliverables.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.importedAt));
       },
       async create(input) {
+        if (input.previousRevisionId) {
+          const previous = db.deliverables.find((item) => item.id === input.previousRevisionId);
+          if (!previous || previous.projectId !== input.projectId) throw notFound('이전 버전 산출물', input.previousRevisionId);
+          // revision은 선형이다. 이미 다음 버전이 있는 산출물에서 갈라지는 새 버전은 만들 수 없다.
+          const hasNext = db.deliverables.some((item) => item.projectId === input.projectId && item.previousRevisionId === input.previousRevisionId);
+          if (hasNext) throw new Error('이미 다음 버전이 있는 산출물이에요. 가장 최신 버전을 이전 버전으로 지정해 주세요.');
+        }
         const deliverable = { id: createId('dlv'), importedAt: nowIso(), ...input };
         db.deliverables.push(deliverable);
         record('deliverable_added', `${deliverable.title} 추가`, { projectId: input.projectId, metadata: { detail: input.type.toUpperCase() } });
@@ -150,18 +158,24 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
       },
     },
 
+    testConditions: {
+      async listByProject(projectId) {
+        return db.testConditions.filter((item) => item.projectId === projectId);
+      },
+    },
+
     testCases: {
       async listByProject(projectId) {
         return db.testCases.filter((item) => item.projectId === projectId);
       },
-      async updateReviewStatus(id, status) {
+      async updateStatus(id, status) {
         const testCase = db.testCases.find((item) => item.id === id);
         if (!testCase) throw notFound('TC', id);
-        testCase.reviewStatus = status;
+        testCase.status = status;
         testCase.updatedAt = nowIso();
-        record('test_case_changed', `${testCase.externalId ?? testCase.id} 검토 상태 변경`, {
+        record('test_case_changed', `${testCase.externalId ?? testCase.id} 상태 변경`, {
           projectId: testCase.projectId,
-          metadata: { detail: status === 'reviewed' ? '검토 완료' : '초안으로 되돌림' },
+          metadata: { detail: status === 'draft' ? '초안으로 되돌림' : testCaseStatusLabel[status] },
         });
         emit();
         return testCase;

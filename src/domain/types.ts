@@ -60,6 +60,8 @@ export interface Deliverable {
   sourceUrl?: string;
   fileRef?: string;
   version?: string;
+  /** 기존 산출물의 새 버전이면 직전 버전의 id. 없으면 별도 신규 산출물이다. */
+  previousRevisionId?: string;
   summary?: string;
   importedAt: string;
   analyzedAt?: string;
@@ -74,19 +76,38 @@ export interface SourceRef {
 }
 
 export type RequirementStatus = 'draft' | 'reviewed' | 'confirmed';
+/** 산출물 revision에 따른 요구사항 상태. 검토 상태(status)와 별개다. */
+export type RequirementLifecycle = 'active' | 'changed' | 'removed';
 
+/**
+ * 요구사항. id는 산출물 revision이 바뀌어도 유지되고,
+ * 근거(sourceRefs)만 새 revision을 가리키도록 갱신한다.
+ */
 export interface Requirement {
   id: string;
   projectId: string;
-  deliverableId: string;
   feature: string;
   text: string;
-  sourceLocator: string;
+  sourceRefs: SourceRef[];
   sourceType: SourceType;
   confidence?: number;
   needsConfirmation: boolean;
-  isChange: boolean;
+  lifecycle: RequirementLifecycle;
   status: RequirementStatus;
+}
+
+/* 테스트 조건: 요구사항에서 무엇을 검증할지 정리한 중간 근거. TC 설계의 기준이 된다. */
+export type TestConditionStatus = 'active' | 'needs_review' | 'deprecated';
+
+export interface TestCondition {
+  id: string;
+  projectId: string;
+  requirementIds: string[];
+  feature: string;
+  title: string;
+  status: TestConditionStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /* TC Template */
@@ -120,12 +141,16 @@ export type TestPerspective =
   | 'performance'
   | 'compatibility';
 
-export type ReviewStatus = 'draft' | 'reviewed' | 'confirmed';
+export type TestCaseStatus = 'draft' | 'reviewed' | 'active' | 'needs_review' | 'deprecated';
+/** 누가 만들었는가. 근거 유형(generationType)과 별개다. */
+export type TestCaseOrigin = 'manual' | 'ai_generated' | 'ai_modified' | 'imported';
 
 export interface TestCase {
+  /** Looma 내부 ID */
   id: string;
   projectId: string;
   templateId?: string;
+  /** 고객사 TC ID (SIGN-001 등). 수행 결과는 이 값으로 연결된다. */
   externalId?: string;
   category: TestPerspective;
   feature: string;
@@ -134,9 +159,14 @@ export interface TestCase {
   precondition?: string;
   steps: string[];
   expectedResult: string;
+  requirementIds: string[];
+  testConditionIds: string[];
   sourceRefs: SourceRef[];
   generationType: SourceType;
-  reviewStatus: ReviewStatus;
+  origin: TestCaseOrigin;
+  status: TestCaseStatus;
+  /** 내용이 바뀔 때마다 1씩 증가한다. 상태 변경만으로는 올리지 않는다. */
+  revision: number;
   duplicateOf?: string;
   createdAt: string;
   updatedAt: string;

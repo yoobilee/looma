@@ -6,7 +6,7 @@ import type {
   Platform,
   ProjectStage,
   ProjectStatus,
-  ReviewStatus,
+  TestCaseStatus,
   ScratchLinkTarget,
   ScratchType,
   SourceType,
@@ -105,10 +105,12 @@ export const generationTypeLabel: Record<SourceType, string> = {
   needs_confirmation: '확인 필요',
 };
 
-export const reviewStatusLabel: Record<ReviewStatus, string> = {
+export const testCaseStatusLabel: Record<TestCaseStatus, string> = {
   draft: '초안',
   reviewed: '검토 완료',
-  confirmed: '확정',
+  active: '사용 중',
+  needs_review: '재검토 필요',
+  deprecated: '폐기',
 };
 
 export const testPerspectiveLabel: Record<TestPerspective, string> = {

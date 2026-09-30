@@ -10,6 +10,7 @@ import type {
   Task,
   TCTemplate,
   TestCase,
+  TestCondition,
   TestResult,
   TestResultImport,
   TestResultValue,
@@ -269,13 +270,12 @@ export function createSeed() {
   ): Requirement => ({
     id,
     projectId: PROJECT_A,
-    deliverableId,
     feature,
     text,
-    sourceLocator,
+    sourceRefs: [{ deliverableId, locator: sourceLocator }],
     sourceType,
     needsConfirmation: sourceType === 'needs_confirmation',
-    isChange,
+    lifecycle: isChange ? 'changed' : 'active',
     status: sourceType === 'source_explicit' ? 'reviewed' : 'draft',
   });
 
@@ -321,7 +321,7 @@ export function createSeed() {
     expectedResult: string,
     sourceRefs: TestCase['sourceRefs'],
     generationType: TestCase['generationType'],
-    reviewStatus: TestCase['reviewStatus'],
+    status: TestCase['status'],
     duplicateOf?: string,
   ): TestCase => ({
     id,
@@ -335,9 +335,13 @@ export function createSeed() {
     precondition: '앱 최신 빌드 설치, 로그아웃 상태',
     steps: ['해당 화면으로 이동한다.', '조건에 맞는 값을 입력한다.', '확인 버튼을 누른다.'],
     expectedResult,
+    requirementIds: [],
+    testConditionIds: [],
     sourceRefs,
     generationType,
-    reviewStatus,
+    origin: 'ai_generated',
+    status,
+    revision: 1,
     duplicateOf,
     createdAt: at(-1, 13, 0),
     updatedAt: at(0, 11, 0),
@@ -363,6 +367,47 @@ export function createSeed() {
     testCase('tc-014', 'PW-002', 'exception', ['비밀번호 재설정', '링크', '만료'], '만료된 재설정 링크 접근 시 안내 노출', '링크 만료 안내 노출', pdf('p.27'), 'ai_suggestion', 'draft'),
     testCase('tc-015', 'PW-003', 'data_io', ['비밀번호 재설정', '변경', '이전 비밀번호'], '이전과 같은 비밀번호로 변경 시 동작', '확인 필요 — 허용 여부 미정', figma('재설정 Frame 1'), 'needs_confirmation', 'draft'),
   ];
+
+  // 요구사항 → 테스트 조건 → TC 추적. 확인 필요·AI 제안처럼 조건이 아직 정리되지 않은 TC는 요구사항만 연결한다.
+  // tc-012는 근거 요구사항이 없는 AI 테스트 관점 제안이라 연결이 없다.
+  const condition = (id: string, feature: string, title: string, requirementIds: string[]): TestCondition => ({
+    id,
+    projectId: PROJECT_A,
+    requirementIds,
+    feature,
+    title,
+    status: 'active',
+    createdAt: at(-1, 12, 0),
+    updatedAt: at(-1, 12, 0),
+  });
+
+  const testConditions: TestCondition[] = [
+    condition('cond-001', '회원가입', '유효한 가입 정보로 가입을 완료한다', ['req-001', 'req-002']),
+    condition('cond-002', '회원가입', '비밀번호 최소 길이 경계', ['req-002']),
+    condition('cond-003', '회원가입', '비밀번호 구성 규칙 위반', ['req-002']),
+    condition('cond-004', '회원가입', '가입된 이메일 중복 안내', ['req-003']),
+    condition('cond-005', '로그인', '로그인 성공 후 홈 이동', ['req-006']),
+    condition('cond-006', '로그인', '자동 로그인 상태 유지', ['req-007']),
+    condition('cond-007', '비밀번호 재설정', '가입 이메일로 재설정 메일 발송', ['req-010']),
+  ];
+
+  const testCaseTrace: Record<string, Pick<TestCase, 'requirementIds' | 'testConditionIds'>> = {
+    'tc-001': { requirementIds: ['req-001', 'req-002'], testConditionIds: ['cond-001'] },
+    'tc-002': { requirementIds: ['req-002'], testConditionIds: ['cond-002'] },
+    'tc-003': { requirementIds: ['req-002'], testConditionIds: ['cond-002'] },
+    'tc-004': { requirementIds: ['req-002'], testConditionIds: ['cond-003'] },
+    'tc-005': { requirementIds: ['req-003'], testConditionIds: ['cond-004'] },
+    'tc-006': { requirementIds: ['req-005'], testConditionIds: [] },
+    'tc-007': { requirementIds: ['req-004'], testConditionIds: [] },
+    'tc-008': { requirementIds: ['req-006'], testConditionIds: ['cond-005'] },
+    'tc-009': { requirementIds: ['req-007'], testConditionIds: ['cond-006'] },
+    'tc-010': { requirementIds: ['req-008'], testConditionIds: [] },
+    'tc-011': { requirementIds: ['req-009'], testConditionIds: [] },
+    'tc-013': { requirementIds: ['req-010'], testConditionIds: ['cond-007'] },
+    'tc-014': { requirementIds: ['req-011'], testConditionIds: [] },
+    'tc-015': { requirementIds: ['req-012'], testConditionIds: [] },
+  };
+  for (const item of testCases) Object.assign(item, testCaseTrace[item.id]);
 
   // 고객사 Excel에서 수행한 결과 파일을 가져왔다고 가정한 데이터.
   // 외부 파일에는 Looma에서 만들지 않은 기존 TC도 함께 들어 있다.
@@ -719,6 +764,7 @@ export function createSeed() {
     deliverables,
     requirements,
     templates,
+    testConditions,
     testCases,
     resultImports,
     results,

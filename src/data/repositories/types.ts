@@ -10,7 +10,6 @@ import type {
   Platform,
   Project,
   Requirement,
-  ReviewStatus,
   ScratchItem,
   ScratchLinkTarget,
   ScratchType,
@@ -19,6 +18,8 @@ import type {
   TaskStatus,
   TCTemplate,
   TestCase,
+  TestCaseStatus,
+  TestCondition,
   TestResult,
   TestResultImport,
   TestScope,
@@ -68,6 +69,8 @@ export interface CreateDeliverableInput {
   sourceUrl?: string;
   fileRef?: string;
   version?: string;
+  /** 기존 산출물의 새 버전으로 등록할 때 직전 버전의 id */
+  previousRevisionId?: string;
 }
 
 export interface DeliverableRepository {
@@ -84,9 +87,13 @@ export interface TemplateRepository {
   saveForProject(projectId: string, template: Omit<TCTemplate, 'id' | 'projectId'>): Promise<TCTemplate>;
 }
 
+export interface TestConditionRepository {
+  listByProject(projectId: string): Promise<TestCondition[]>;
+}
+
 export interface TestCaseRepository {
   listByProject(projectId: string): Promise<TestCase[]>;
-  updateReviewStatus(id: string, status: ReviewStatus): Promise<TestCase>;
+  updateStatus(id: string, status: TestCaseStatus): Promise<TestCase>;
 }
 
 export interface TestResultRepository {
@@ -163,6 +170,7 @@ export interface Repositories {
   deliverables: DeliverableRepository;
   requirements: RequirementRepository;
   templates: TemplateRepository;
+  testConditions: TestConditionRepository;
   testCases: TestCaseRepository;
   testResults: TestResultRepository;
   issues: IssueRepository;
