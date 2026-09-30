@@ -1,5 +1,5 @@
 import type { Activity, ActivityType, ScratchItem } from '@/domain/types';
-import { testCaseStatusLabel } from '@/domain/labels';
+import { executionTypeLabel, testCaseStatusLabel } from '@/domain/labels';
 import {
   decisionConflictMessage,
   decisionConflicts,
@@ -9,6 +9,7 @@ import {
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
 import { analyzeTestAssetImport, planTestAssetImport } from '@/domain/testAssetImport';
+import { analyzeResultImport, planResultImport, resultImportSummaryText, summarizeResultImport, usesCyclePlatform } from '@/domain/testResultImport';
 import type { Repositories } from '../repositories/types';
 import { createSeed, type SeedData } from './seed';
 
@@ -308,6 +309,36 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
       },
       async listResults(importId) {
         return db.results.filter((item) => item.importId === importId);
+      },
+      async importResults(input) {
+        const project = db.projects.find((item) => item.id === input.projectId);
+        if (!project) throw notFound('프로젝트', input.projectId);
+        const templateMappings = db.templates.find((item) => item.id === project.tcTemplateId)?.resultMappings ?? [];
+        const testCases = db.testCases.filter((item) => item.projectId === input.projectId);
+        // 미리보기와 같은 규칙으로 현재 TC · 템플릿 기준 판정을 다시 계산한다. 그 사이 바뀌었으면 계획 단계에서 거부된다.
+        const analysis = analyzeResultImport(input.table, input.mapping, testCases, templateMappings);
+        // 먼저 전부 계산하고 검증한다. 여기서 실패하면 db는 그대로다. 기준 TC는 읽기만 한다.
+        const plan = planResultImport(
+          analysis,
+          input.rowDecisions,
+          input.valueDecisions,
+          input.cycle,
+          {
+            testCases,
+            existingImports: db.resultImports.filter((item) => item.projectId === input.projectId),
+            cyclePlatformAllowed: usesCyclePlatform(input.mapping),
+          },
+          { projectId: input.projectId, fileName: input.fileName, now: nowIso(), createId },
+        );
+        db.resultImports.push(plan.resultImport);
+        db.results.push(...plan.results);
+        const { round, executionType } = plan.resultImport;
+        record('results_uploaded', `${round}차 ${executionTypeLabel[executionType ?? 'full']} 결과 가져오기`, {
+          projectId: input.projectId,
+          metadata: { detail: resultImportSummaryText(summarizeResultImport(plan.results)) },
+        });
+        emit();
+        return plan.resultImport;
       },
     },
 

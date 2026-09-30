@@ -12,8 +12,9 @@ import {
   passRate,
   retestCandidates,
 } from '@/domain/resultSummary';
-import { platformLabel, testResultLabel, testResultOrder } from '@/domain/labels';
-import type { TestResult } from '@/domain/types';
+import { summarizeResultImport } from '@/domain/testResultImport';
+import { executionTypeLabel, platformLabel, testResultLabel, testResultOrder } from '@/domain/labels';
+import type { TestResult, TestResultImport } from '@/domain/types';
 import { formatMonthDay } from '@/lib/date';
 import { Button } from '@/components/ui/Button';
 import { FilterTabs } from '@/components/ui/FilterTabs';
@@ -22,22 +23,27 @@ import { ResultTag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
 import { ResultLegend, ResultStackedBar } from './ResultStackedBar';
-import { ResultUploadDialog } from './ResultUploadDialog';
+import { ResultImportDialog } from './ResultImportDialog';
 import styles from './ResultDashboardTab.module.css';
 
 const flowSteps = ['Looma TC 초안', '고객사 양식 XLSX 내보내기', 'Excel 등에서 수동 수행', '수행 완료 파일 업로드', '결과 분석 · 요약'];
+
+/** 결과를 같은 TC로 묶는 키. 연결된 TC가 우선이고, 고객사 TC ID도 없는 미연결 결과는 따로 둔다. */
+const retestKey = (result: TestResult) => result.testCaseId ?? (result.externalId ? `ext:${result.externalId}` : `res:${result.id}`);
 
 /** 재수행 목록은 TC 단위로 묶고 플랫폼별 결과를 함께 보여준다. */
 function groupRetests(results: TestResult[]) {
   const map = new Map<string, TestResult[]>();
   for (const result of retestCandidates(results)) {
-    map.set(result.externalId, [...(map.get(result.externalId) ?? []), result]);
+    map.set(retestKey(result), [...(map.get(retestKey(result)) ?? []), result]);
   }
-  return [...map.entries()].map(([externalId, items]) => ({
-    externalId,
+  return [...map.entries()].map(([key, items]) => ({
+    key,
+    externalId: items[0].externalId,
+    linked: !!items[0].testCaseId,
     title: items[0].title,
     feature: items[0].feature,
-    items: results.filter((result) => result.externalId === externalId),
+    items: results.filter((result) => retestKey(result) === key),
     issueId: items.find((item) => item.issueId)?.issueId,
     note: items.find((item) => item.note)?.note,
   }));
@@ -59,7 +65,9 @@ export function ResultDashboardTab() {
       const resultsByImport = Object.fromEntries(await Promise.all(imports.map(async (item) => [item.id, await repos.testResults.listResults(item.id)] as const)));
       const issues = await repos.issues.listByProject(project.id);
       const template = project.tcTemplateId ? await repos.templates.get(project.tcTemplateId) : undefined;
-      return { imports, resultsByImport, issues, template };
+      // 결과 연결 판정에만 쓴다. 수행 결과 가져오기는 TC를 바꾸지 않는다.
+      const testCases = await repos.testCases.listByProject(project.id);
+      return { imports, resultsByImport, issues, template, testCases };
     },
     [project.id, project.tcTemplateId],
   );
@@ -67,7 +75,7 @@ export function ResultDashboardTab() {
   if (data.status === 'loading') return <LoadingState />;
   if (data.status === 'error') return <StateMessage tone="error" title="수행 결과를 불러오지 못했어요." />;
 
-  const { imports, resultsByImport, issues, template } = data.data;
+  const { imports, resultsByImport, issues, template, testCases } = data.data;
   const flowCurrent = imports.length > 0 ? 4 : 1;
 
   const flow = (
@@ -81,7 +89,18 @@ export function ResultDashboardTab() {
     </ol>
   );
 
-  const uploadDialog = <ResultUploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} template={template} />;
+  // 열 때마다 새로 만들어 이전 가져오기의 입력이 남지 않게 한다.
+  const uploadDialog = uploadOpen && (
+    <ResultImportDialog
+      open
+      onClose={() => setUploadOpen(false)}
+      projectId={project.id}
+      platforms={project.platforms}
+      testCases={testCases}
+      imports={imports}
+      templateMappings={template?.resultMappings ?? []}
+    />
+  );
 
   if (imports.length === 0) {
     return (
@@ -89,7 +108,7 @@ export function ResultDashboardTab() {
         {flow}
         <StateMessage
           title="아직 업로드한 수행 결과가 없어요."
-          description="고객사 양식에서 수행을 마친 XLSX/CSV를 올리면 PASS · FAIL · BLOCKED · 미수행을 플랫폼과 기능별로 요약해요."
+          description="고객사 양식에서 수행을 마친 CSV 파일을 올리면 PASS · FAIL · BLOCKED · 미수행을 플랫폼과 기능별로 요약해요."
           action={
             <Button variant="primary" icon={<Upload aria-hidden />} onClick={() => setUploadOpen(true)}>
               수행 결과 파일 업로드
@@ -106,6 +125,7 @@ export function ResultDashboardTab() {
   const previous = currentIndex > 0 ? imports[currentIndex - 1] : undefined;
   const results = resultsByImport[current.id] ?? [];
   const counts = countResults(results);
+  const summary = summarizeResultImport(results);
   const previousCounts = previous ? countResults(resultsByImport[previous.id] ?? []) : undefined;
   const platforms = groupByPlatform(results);
   const features = groupByFeature(results);
@@ -123,10 +143,19 @@ export function ResultDashboardTab() {
           label="수행 차수"
           value={current.id}
           onChange={setSelectedImportId}
-          options={imports.map((item) => ({ value: item.id, label: `${item.round}차` }))}
+          options={imports.map((item) => ({ value: item.id, label: roundLabel(item) }))}
         />
         <p className={styles.fileMeta}>
-          {current.fileRef} · {formatMonthDay(current.importedAt)} 업로드
+          {[
+            executionTypeLabel[current.executionType ?? 'full'],
+            current.executedFrom && `${current.executedFrom}${current.executedTo ? ` ~ ${current.executedTo}` : ''} 수행`,
+            current.environment,
+            current.fileRef,
+            `${formatMonthDay(current.importedAt)} 업로드`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+          {summary.unlinked > 0 && <span className={styles.unlinked}> · 미연결 {summary.unlinked}건</span>}
         </p>
         <Button variant="primary" icon={<Upload aria-hidden />} onClick={() => setUploadOpen(true)}>
           수행 결과 업로드
@@ -249,14 +278,15 @@ export function ResultDashboardTab() {
             {visibleRetests.map((retest) => {
               const issue = retest.issueId ? issueById[retest.issueId] : undefined;
               return (
-                <li key={retest.externalId} className={styles.retest}>
+                <li key={retest.key} className={styles.retest}>
                   <div className={styles.retestMain}>
                     <p className={styles.retestTitle}>
-                      <span className={styles.retestId}>{retest.externalId}</span>
+                      <span className={styles.retestId}>{retest.externalId ?? 'ID 없음'}</span>
                       {retest.title}
                     </p>
                     <p className={styles.retestMeta}>
                       {retest.feature}
+                      {!retest.linked && ' · 미연결'}
                       {retest.note && ` · ${retest.note}`}
                       {issue && (
                         <>
@@ -319,10 +349,15 @@ export function ResultDashboardTab() {
           ) : (
             <p className={styles.muted}>비교할 이전 차수가 없어요.</p>
           )}
+          {previous && (previous.executionType ?? 'full') !== (current.executionType ?? 'full') && (
+            <p className={styles.compareNote}>
+              {executionTypeLabel[previous.executionType ?? 'full']}과 {executionTypeLabel[current.executionType ?? 'full']}은 수행 범위가 달라 건수 변화는 참고용이에요.
+            </p>
+          )}
 
           <div className={styles.mapping}>
             <p className={styles.mappingTitle}>이 파일의 상태값 매핑</p>
-            <p className={styles.mappingValues}>{current.mapping.map((mapping) => `${mapping.rawValue} → ${testResultLabel[mapping.result]}`).join(' · ')}</p>
+            <p className={styles.mappingValues}>{current.mapping.map((mapping) => `${mapping.rawValue.trim() || '(빈 값)'} → ${testResultLabel[mapping.result]}`).join(' · ')}</p>
           </div>
         </section>
       </div>
@@ -331,4 +366,9 @@ export function ResultDashboardTab() {
       {uploadDialog}
     </div>
   );
+}
+
+/** 차수 탭 라벨. 전체 수행이 아니면 유형을 함께 보여준다. */
+function roundLabel(item: TestResultImport): string {
+  return item.executionType && item.executionType !== 'full' ? `${item.round}차 · ${executionTypeLabel[item.executionType]}` : `${item.round}차`;
 }

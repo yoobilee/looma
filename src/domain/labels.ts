@@ -3,6 +3,7 @@ import type {
   ChangeAnalysisStatus,
   DeliverableType,
   DuplicateResolution,
+  ExecutionType,
   IssueStatus,
   IssueType,
   Platform,
@@ -29,6 +30,7 @@ import type {
   TestAssetImportField,
   TestAssetMatchKind,
 } from './testAssetImport';
+import type { ResultConflictReason, ResultImportField, ResultMatchKind } from './testResultImport';
 
 // 화면에 보이는 한국어 라벨은 모두 이 파일에서 관리한다.
 // PASS/FAIL/BLOCKED, TC, Android/iOS처럼 QA 실무에서 그대로 쓰는 용어는 원문을 유지한다.
@@ -299,4 +301,41 @@ export const testAssetImportDecisionLabel: Record<TestAssetImportDecision, strin
   update: '기존 TC 업데이트',
   create_separate: '별도 신규 TC',
   excluded: '제외',
+};
+
+/* 수행 결과 가져오기 */
+export const executionTypeOrder: ExecutionType[] = ['full', 'partial', 'retest', 'release_candidate'];
+
+export const executionTypeLabel: Record<ExecutionType, string> = {
+  full: '전체 수행',
+  partial: '부분 수행',
+  retest: '재수행',
+  release_candidate: 'RC 검증',
+};
+
+export const resultImportFieldLabel: Record<ResultImportField, string> = {
+  externalId: '고객사 TC ID',
+  title: '테스트 항목',
+  feature: '기능',
+  result: '수행 결과',
+  platform: '플랫폼',
+  note: '비고',
+  result_android: '수행 결과 · Android',
+  result_ios: '수행 결과 · iOS',
+  result_web: '수행 결과 · Web',
+  result_desktop: '수행 결과 · PC',
+};
+
+export const resultMatchOrder: ResultMatchKind[] = ['matched', 'unmatched', 'conflict', 'invalid'];
+
+export const resultMatchLabel: Record<ResultMatchKind, string> = {
+  matched: '연결됨',
+  unmatched: '미연결',
+  conflict: '충돌',
+  invalid: '오류',
+};
+
+export const resultConflictReasonLabel: Record<ResultConflictReason, string> = {
+  ambiguous_external_id: '같은 고객사 TC ID를 쓰는 TC가 여러 개라 어느 TC인지 정할 수 없어요. 가져오면 미연결 결과로 보존해요.',
+  duplicate_in_file: '같은 TC · 플랫폼 결과가 파일에 둘 이상 있어요. 하나만 가져올 수 있어요.',
 };

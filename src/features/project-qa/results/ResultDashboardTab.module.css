@@ -377,3 +377,14 @@
     grid-column: 1 / -1;
   }
 }
+
+.unlinked {
+  color: var(--color-coral-strong);
+  font-weight: 700;
+}
+
+.compareNote {
+  margin-top: 8px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+}

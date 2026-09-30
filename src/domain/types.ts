@@ -198,24 +198,48 @@ export interface TestAssetImportSession {
 }
 
 /* 수행 결과 */
+/** 수행 유형. 같은 TC의 결과는 차수마다 독립적으로 쌓인다. */
+export type ExecutionType = 'full' | 'partial' | 'retest' | 'release_candidate';
+
+/**
+ * 수행 차수(실행 Cycle). 수행 결과 파일 하나를 가져온 단위이며 round는 프로젝트 안에서 겹치지 않는다.
+ * 수행 결과는 기준 TC 정의를 소유하지 않으므로 이 기록은 TC를 만들거나 바꾸지 않는다.
+ */
 export interface TestResultImport {
   id: string;
   projectId: string;
   round: number;
+  /** 원본 파일 이름 */
   fileRef: string;
   importedAt: string;
+  /** 이 파일에서 실제로 쓴 상태값 매핑(원문 → 표준 결과) */
   mapping: ResultMapping[];
+  executionType?: ExecutionType;
+  /** 수행 시작일(YYYY-MM-DD) */
+  executedFrom?: string;
+  /** 수행 종료일(YYYY-MM-DD). 하루 수행이면 없다. */
+  executedTo?: string;
+  environment?: string;
+  /** 파일에 플랫폼 정보가 없을 때 이 차수의 결과에 붙인 플랫폼 */
+  platform?: Platform;
+  note?: string;
 }
 
 export interface TestResult {
   id: string;
   importId: string;
+  /** 연결된 기준 TC. 없으면 미연결 결과이며 원본 값은 그대로 보존한다. */
   testCaseId?: string;
-  externalId: string;
+  /** 파일의 고객사 TC ID. 파일에 없던 행이면 비어 있다. */
+  externalId?: string;
   feature: string;
   title: string;
   platform?: Platform;
   result: TestResultValue;
+  /** 파일에 적힌 결과 원문(P, OK, 성공 등) */
+  rawResult?: string;
+  /** 결과를 읽은 파일 행 번호 */
+  sourceRowNumber?: number;
   issueId?: string;
   note?: string;
 }
