@@ -136,6 +136,11 @@
     padding: 16px;
   }
 
+  .countRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
   .item {
     grid-template-columns: 1fr;
     gap: 6px;

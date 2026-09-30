@@ -180,4 +180,17 @@
   .body {
     margin-top: 28px;
   }
+
+  /* 좁은 화면에서는 여섯 단계를 두 줄로 모두 보여 준다. 가로로 숨은 단계가 없게 한다. */
+  .tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+
+  .tab {
+    gap: 6px;
+    padding: 0 8px;
+    white-space: normal;
+    text-align: center;
+  }
 }
