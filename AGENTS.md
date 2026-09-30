@@ -183,6 +183,10 @@
 **병합 방식과 금지**
 
 - 기존 저장소 방식대로 merge commit으로 병합하고, 성공 후 원격·로컬 작업 브랜치를 삭제한다.
+- merge commit 제목도 Conventional Commit 형식(`feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`)을 따른다. GitHub 기본값(`Merge pull request #N ...`)을 그대로 두지 않는다.
+  - PR 성격에 맞는 prefix를 고르고, 제목은 한국어로 간결하게 요약한다.
+  - PR 제목이 이미 올바른 Conventional Commit 형식이면 그 제목을 그대로 subject로 사용해도 된다.
+  - 실행 예: `gh pr merge <N> --merge --delete-branch --subject "<conventional commit title>"`
 - CI 실패를 단순 재실행, 시간 경과, 우회 설정으로 통과시키고 병합하지 않는다. 원인을 해결하거나 사용자 판단을 받는다.
 - 조건 확인에 실패하거나 판단이 불확실하면 병합하지 않고 사용자 확인 상태로 둔다(fail-closed).
 - 이 정책을 추가하거나 변경하는 PR은 자동 병합 대상이 아니며 사용자 확인 후 병합한다.
