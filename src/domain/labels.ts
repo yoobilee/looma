@@ -10,6 +10,7 @@ import type {
   ProjectStatus,
   RequirementChangeKind,
   ReviewDecision,
+  TestCaseGenerationType,
   TestCaseStatus,
   TestImpactKind,
   ScratchLinkTarget,
@@ -21,6 +22,13 @@ import type {
   TestResultValue,
   TestScope,
 } from './types';
+import type {
+  TestAssetConflictReason,
+  TestAssetContentField,
+  TestAssetImportDecision,
+  TestAssetImportField,
+  TestAssetMatchKind,
+} from './testAssetImport';
 
 // 화면에 보이는 한국어 라벨은 모두 이 파일에서 관리한다.
 // PASS/FAIL/BLOCKED, TC, Android/iOS처럼 QA 실무에서 그대로 쓰는 용어는 원문을 유지한다.
@@ -104,10 +112,11 @@ export const requirementSourceLabel: Record<SourceType, string> = {
   needs_confirmation: '확인 필요',
 };
 
-export const generationTypeLabel: Record<SourceType, string> = {
+export const generationTypeLabel: Record<TestCaseGenerationType, string> = {
   source_explicit: '산출물 직접 근거',
   ai_suggestion: 'AI 테스트 관점 제안',
   needs_confirmation: '확인 필요',
+  imported_existing: '기존 TC 가져오기',
 };
 
 export const testCaseStatusLabel: Record<TestCaseStatus, string> = {
@@ -240,4 +249,54 @@ export const activityTypeLabel: Record<ActivityType, string> = {
   project_changed: '프로젝트 변경',
   knowledge_saved: '업무 지식',
   changes_applied: '변경사항 반영',
+  test_assets_imported: 'TC 가져오기',
+};
+
+/* TC 자산 가져오기 */
+export const testAssetImportFieldLabel: Record<TestAssetImportField, string> = {
+  externalId: '고객사 TC ID',
+  category: '구분(테스트 관점)',
+  feature: '기능',
+  depth1: '대분류',
+  depth2: '중분류',
+  depth3: '소분류',
+  title: '테스트 항목',
+  precondition: 'Pre-condition',
+  steps: 'Test Step',
+  expectedResult: 'Expected Result',
+};
+
+export const testAssetContentFieldLabel: Record<TestAssetContentField, string> = {
+  category: '구분',
+  feature: '기능',
+  depth: 'Depth',
+  title: '테스트 항목',
+  precondition: 'Pre-condition',
+  steps: 'Test Step',
+  expectedResult: 'Expected Result',
+};
+
+export const testAssetConflictReasonLabel: Record<TestAssetConflictReason, string> = {
+  external_id_mismatch: '파일의 고객사 TC ID를 쓰는 기존 TC는 없지만, 내용이 같은 기존 TC가 있어요.',
+  ambiguous_content: '내용이 같은 기존 TC가 여러 개예요.',
+  ambiguous_external_id: '같은 고객사 TC ID를 쓰는 기존 TC가 여러 개예요. 기존 TC를 먼저 정리해 주세요.',
+  shared_target: '파일의 다른 행이 같은 기존 TC를 가리켜요.',
+};
+
+export const testAssetMatchOrder: TestAssetMatchKind[] = ['new', 'exact_match', 'changed', 'conflict', 'invalid'];
+
+export const testAssetMatchLabel: Record<TestAssetMatchKind, string> = {
+  new: '신규',
+  exact_match: '동일',
+  changed: '변경 후보',
+  conflict: '충돌',
+  invalid: '오류',
+};
+
+export const testAssetImportDecisionLabel: Record<TestAssetImportDecision, string> = {
+  pending: '판단 필요',
+  import: '가져오기',
+  update: '기존 TC 업데이트',
+  create_separate: '별도 신규 TC',
+  excluded: '제외',
 };

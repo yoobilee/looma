@@ -103,6 +103,12 @@
   color: var(--color-muted);
 }
 
+.headerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .filters {
   margin-bottom: 16px;
 }

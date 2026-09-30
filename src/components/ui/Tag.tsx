@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { SourceType, TestResultValue } from '@/domain/types';
+import type { SourceType, TestCaseGenerationType, TestResultValue } from '@/domain/types';
 import { requirementSourceLabel, testResultLabel } from '@/domain/labels';
 import styles from './Tag.module.css';
 
@@ -13,15 +13,16 @@ export function Tag({ tone = 'neutral', children, title }: { tone?: TagTone; chi
   );
 }
 
-const sourceTone: Record<SourceType, TagTone> = {
+const sourceTone: Record<TestCaseGenerationType, TagTone> = {
   source_explicit: 'sky',
   ai_suggestion: 'outline',
   needs_confirmation: 'coral',
+  imported_existing: 'neutral',
 };
 
-/** 산출물 직접 명시 / AI 제안 / 확인 필요 구분 */
-export function SourceTypeTag({ sourceType, label }: { sourceType: SourceType; label?: string }) {
-  return <Tag tone={sourceTone[sourceType]}>{label ?? requirementSourceLabel[sourceType]}</Tag>;
+/** 산출물 직접 명시 / AI 제안 / 확인 필요 구분. TC는 기존 TC 가져오기도 쓰며, 이 값은 label을 함께 넘긴다. */
+export function SourceTypeTag({ sourceType, label }: { sourceType: TestCaseGenerationType; label?: string }) {
+  return <Tag tone={sourceTone[sourceType]}>{label ?? requirementSourceLabel[sourceType as SourceType]}</Tag>;
 }
 
 const resultTone: Record<TestResultValue, TagTone> = {

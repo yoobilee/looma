@@ -8,6 +8,7 @@ import {
   requirementChangeNeedsDecision,
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
+import { analyzeTestAssetImport, planTestAssetImport } from '@/domain/testAssetImport';
 import type { Repositories } from '../repositories/types';
 import { createSeed, type SeedData } from './seed';
 
@@ -265,6 +266,39 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
         });
         emit();
         return testCase;
+      },
+    },
+
+    testAssetImports: {
+      async listByProject(projectId) {
+        return db.testAssetImports.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.importedAt));
+      },
+      async apply(input) {
+        const project = db.projects.find((item) => item.id === input.projectId);
+        if (!project) throw notFound('프로젝트', input.projectId);
+        // 미리보기와 같은 규칙으로 현재 TC 기준 판정을 다시 계산한다. 그 사이 TC가 바뀌었으면 계획 단계에서 거부된다.
+        const analysis = analyzeTestAssetImport(
+          input.table,
+          input.mapping,
+          db.testCases.filter((item) => item.projectId === input.projectId),
+        );
+        // 먼저 전부 계산하고 검증한다. 여기서 실패하면 db는 그대로다.
+        const plan = planTestAssetImport(analysis, input.decisions, db.testCases, {
+          projectId: input.projectId,
+          fileName: input.fileName,
+          now: nowIso(),
+          createId,
+          templateId: project.tcTemplateId,
+        });
+        db.testCases = plan.testCases;
+        db.testAssetImports.push(plan.session);
+        const { session } = plan;
+        record('test_assets_imported', `TC 자산 ${session.created + session.updated}건 가져오기`, {
+          projectId: input.projectId,
+          metadata: { detail: `${session.fileName} · 신규 ${session.created} · 업데이트 ${session.updated} · 변경 없음 ${session.unchanged} · 제외 ${session.excluded}` },
+        });
+        emit();
+        return session;
       },
     },
 
