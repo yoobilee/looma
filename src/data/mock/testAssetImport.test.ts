@@ -94,6 +94,7 @@ describe('신규 가져오기', () => {
       testConditionIds: [],
       sourceRefs: [],
       origin: 'imported',
+      generationType: 'imported_existing',
       status: 'draft',
       revision: 1,
       importSource: { sessionId: session.id, rowNumber: 2 },

@@ -141,6 +141,9 @@ export type TestPerspective =
   | 'performance'
   | 'compatibility';
 
+/** TC의 근거 유형. 요구사항과 공유하는 SourceType에 고객사 기존 TC 가져오기를 더한 값이다. */
+export type TestCaseGenerationType = SourceType | 'imported_existing';
+
 export type TestCaseStatus = 'draft' | 'reviewed' | 'active' | 'needs_review' | 'deprecated';
 /** 누가 만들었는가. 근거 유형(generationType)과 별개다. */
 export type TestCaseOrigin = 'manual' | 'ai_generated' | 'ai_modified' | 'imported' | 'import_modified';
@@ -168,7 +171,7 @@ export interface TestCase {
   requirementIds: string[];
   testConditionIds: string[];
   sourceRefs: SourceRef[];
-  generationType: SourceType;
+  generationType: TestCaseGenerationType;
   origin: TestCaseOrigin;
   status: TestCaseStatus;
   /** 내용이 바뀔 때마다 1씩 증가한다. 상태 변경만으로는 올리지 않는다. */

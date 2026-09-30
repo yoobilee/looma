@@ -200,3 +200,12 @@ describe('반영 계획 방어', () => {
     ]);
   });
 });
+
+describe('생성 유형 표시', () => {
+  it('가져온 TC만 기존 TC 가져오기로 표시하고 요구사항 근거 라벨은 그대로다', async () => {
+    const { generationTypeLabel, requirementSourceLabel } = await import('./labels');
+    expect(generationTypeLabel.imported_existing).toBe('기존 TC 가져오기');
+    expect(generationTypeLabel.source_explicit).toBe('산출물 직접 근거');
+    expect(requirementSourceLabel).not.toHaveProperty('imported_existing');
+  });
+});

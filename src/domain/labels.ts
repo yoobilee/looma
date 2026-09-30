@@ -10,6 +10,7 @@ import type {
   ProjectStatus,
   RequirementChangeKind,
   ReviewDecision,
+  TestCaseGenerationType,
   TestCaseStatus,
   TestImpactKind,
   ScratchLinkTarget,
@@ -111,10 +112,11 @@ export const requirementSourceLabel: Record<SourceType, string> = {
   needs_confirmation: '확인 필요',
 };
 
-export const generationTypeLabel: Record<SourceType, string> = {
+export const generationTypeLabel: Record<TestCaseGenerationType, string> = {
   source_explicit: '산출물 직접 근거',
   ai_suggestion: 'AI 테스트 관점 제안',
   needs_confirmation: '확인 필요',
+  imported_existing: '기존 TC 가져오기',
 };
 
 export const testCaseStatusLabel: Record<TestCaseStatus, string> = {

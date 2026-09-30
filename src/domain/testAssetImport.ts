@@ -540,7 +540,7 @@ export function planTestAssetImport(
         testConditionIds: [],
         sourceRefs: [],
         // 고객사가 이미 쓰던 TC 정의 자체가 근거다.
-        generationType: 'source_explicit',
+        generationType: 'imported_existing',
         origin: 'imported',
         // 가져온 TC도 기존 검토 흐름을 거친다. 자동으로 사용 중(active)으로 만들지 않는다.
         status: 'draft',
