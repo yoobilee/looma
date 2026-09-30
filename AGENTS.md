@@ -123,6 +123,8 @@
 - 브랜드 고유 요소와 유지할 자산: Sky Blue #4D8EF7, Soft Coral #F28B7B, Pearl/Lilac #FBFAFF 브리지, Ink #151821, 하나의 연속적인 ambient field, 플로팅 glass 사이드바
 - 화면 밀도·정보 계층·시각적 분위기: 안정적인 현대 웹앱 75% + 선도적 포인트 25%. 라이트 기본·다크 선택. 임시 작업공간은 항상 높은 위계
 - 참고 범위와 피할 표현: glass는 사이드바·검색·작은 플로팅 컨트롤·팝오버/모달에만. 과한 glow·grid·neon cyan/purple, 같은 둥근 카드 반복을 피한다. 우선순위는 Starter Pack 규칙 > SPEC(기능) > Penpot(시각)
+- 정보 계층·공간감: 과도하게 평평하고 텍스트 중심의 productivity UI로 흐르지 않으며, 정보 계층과 공간적 깊이를 유지한다. 화면의 기준점과 작업 단위는 solid surface, 1px line, 얕은 shadow, hover depth 등 필요한 수단으로 구분하되, 모든 영역에 같은 카드와 그림자를 반복하지 않는다.
+- glass 역할 구분: 사이드바와 검색 등 상시 플로팅 컨트롤은 반투명 glass를 사용하고, 팝오버·메뉴·다이얼로그는 거의 불투명한 glass를 사용해 배경이 가독성을 방해하지 않게 한다.
 - UI 문구: 한국어만 사용. PASS/FAIL/BLOCKED, TC, Android/iOS 등 QA 실무 용어는 원문 유지. 화면 라벨은 `src/domain/labels.ts`에서 관리
 - 명명: 컴포넌트는 PascalCase 파일(`ResultDashboardTab.tsx`), 훅·유틸은 camelCase, 기능별 코드는 `src/features/<기능>`에 둔다.
 
@@ -144,6 +146,10 @@
 - 버전 기준 파일: `package.json`
 - 태그 형식: `vX.Y.Z`
 - 배포 절차 재정의: 없음
+- CI: GitHub Actions (`.github/workflows/ci.yml`), PR과 main push에서 실행하며 검증 진입점은 `npm run verify`
+- 필수 상태 검사: `verify`
+- 기본 브랜치 보호: `main protection` ruleset (대상: 기본 브랜치 `main`)
+  - PR 필수, force push·삭제 차단, required approvals 0, 브랜치 최신 상태 요구, bypass 없음
 
 ### 리뷰 자동화 설정
 
