@@ -14,7 +14,7 @@ interface TestCaseTableProps {
 function sourceLabel(testCase: TestCase, deliverables: Deliverable[]): string {
   if (testCase.duplicateOf) return testCase.duplicateOf;
   const ref = testCase.sourceRefs[0];
-  if (!ref) return '출처 없음';
+  if (!ref) return testCase.importSource ? `가져온 TC ${testCase.importSource.rowNumber}행` : '출처 없음';
   const deliverable = deliverables.find((item) => item.id === ref.deliverableId);
   const prefix = deliverable?.type === 'figma' ? 'Figma' : deliverable?.type.toUpperCase() ?? '';
   return `${prefix} ${ref.locator}`.trim();

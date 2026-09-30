@@ -143,7 +143,13 @@ export type TestPerspective =
 
 export type TestCaseStatus = 'draft' | 'reviewed' | 'active' | 'needs_review' | 'deprecated';
 /** 누가 만들었는가. 근거 유형(generationType)과 별개다. */
-export type TestCaseOrigin = 'manual' | 'ai_generated' | 'ai_modified' | 'imported';
+export type TestCaseOrigin = 'manual' | 'ai_generated' | 'ai_modified' | 'imported' | 'import_modified';
+
+/** 고객사 TC 파일 가져오기 근거. 이 TC를 마지막으로 만들거나 바꾼 가져오기 작업과 파일 행을 가리킨다. */
+export interface TestAssetImportSource {
+  sessionId: string;
+  rowNumber: number;
+}
 
 export interface TestCase {
   /** Looma 내부 ID */
@@ -168,8 +174,24 @@ export interface TestCase {
   /** 내용이 바뀔 때마다 1씩 증가한다. 상태 변경만으로는 올리지 않는다. */
   revision: number;
   duplicateOf?: string;
+  importSource?: TestAssetImportSource;
   createdAt: string;
   updatedAt: string;
+}
+
+/* TC 자산 가져오기: 고객사가 쓰던 TC 정의를 기준 TC로 가져온 작업 단위. 수행 결과 업로드와 별개다. */
+export interface TestAssetImportSession {
+  id: string;
+  projectId: string;
+  fileName: string;
+  importedAt: string;
+  /** 빈 행을 뺀 파일의 데이터 행 수 */
+  totalRows: number;
+  created: number;
+  updated: number;
+  /** 기존 TC와 내용이 같아 바꾸지 않은 행 */
+  unchanged: number;
+  excluded: number;
 }
 
 /* 수행 결과 */
@@ -351,7 +373,8 @@ export type ActivityType =
   | 'issue_created'
   | 'project_changed'
   | 'knowledge_saved'
-  | 'changes_applied';
+  | 'changes_applied'
+  | 'test_assets_imported';
 
 export interface Activity {
   id: string;

@@ -24,9 +24,11 @@ import type {
   TestCaseStatus,
   TestCondition,
   TestResult,
+  TestAssetImportSession,
   TestResultImport,
   TestScope,
 } from '@/domain/types';
+import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/domain/testAssetImport';
 
 // UI는 이 인터페이스만 사용한다.
 // 1차 구현은 data/mock의 메모리 구현을 쓰고, 이후 Supabase나 실제 연동 구현으로 교체한다.
@@ -97,6 +99,25 @@ export interface TestConditionRepository {
 export interface TestCaseRepository {
   listByProject(projectId: string): Promise<TestCase[]>;
   updateStatus(id: string, status: TestCaseStatus): Promise<TestCase>;
+}
+
+export interface ApplyTestAssetImportInput {
+  projectId: string;
+  fileName: string;
+  table: ImportTable;
+  mapping: ColumnMapping;
+  decisions: TestAssetImportRowDecision[];
+}
+
+/** 고객사 TC 파일을 기준 TC로 가져온다. 수행 결과 업로드와 별개다. */
+export interface TestAssetImportRepository {
+  /** 최신 가져오기부터 반환한다. */
+  listByProject(projectId: string): Promise<TestAssetImportSession[]>;
+  /**
+   * 현재 TC 기준으로 다시 분석해 미리보기 판정과 같을 때만 한 번에 반영한다.
+   * 하나라도 문제가 있으면 TC · 가져오기 기록 · 활동을 모두 그대로 둔다.
+   */
+  apply(input: ApplyTestAssetImportInput): Promise<TestAssetImportSession>;
 }
 
 export interface TestResultRepository {
@@ -194,6 +215,7 @@ export interface Repositories {
   templates: TemplateRepository;
   testConditions: TestConditionRepository;
   testCases: TestCaseRepository;
+  testAssetImports: TestAssetImportRepository;
   testResults: TestResultRepository;
   issues: IssueRepository;
   knowledge: KnowledgeRepository;

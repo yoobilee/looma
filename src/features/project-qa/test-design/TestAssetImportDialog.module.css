@@ -1,0 +1,373 @@
+.body {
+  display: grid;
+  /* 표처럼 넓은 내용이 대화상자 너비를 밀어내지 않도록 열을 부모 너비에 묶는다. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.body input[type='file'] {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+/* 단계 표시 */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-line);
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stepNumber {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.currentStep {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.currentStep .stepNumber {
+  border-color: var(--color-sky);
+  background: var(--color-sky);
+  color: #fff;
+}
+
+.subTitle {
+  font: var(--text-body-strong);
+  overflow-wrap: anywhere;
+}
+
+.caption {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+/* 파일 */
+.fileSummary {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control-lg);
+  background: var(--surface);
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.columns span {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  font: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+/* 매핑 */
+.mappingGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.mappingGrid label {
+  overflow-wrap: anywhere;
+}
+
+.problems,
+.notices,
+.issues {
+  display: grid;
+  gap: 4px;
+  font: var(--text-caption);
+}
+
+.problems {
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-coral);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--color-coral-soft);
+  color: var(--color-coral-strong);
+  font-weight: 700;
+}
+
+.notices {
+  padding-left: 16px;
+  color: var(--color-muted);
+  list-style: disc;
+}
+
+/* 미리보기 */
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.counts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 96px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.counts dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.counts dd {
+  margin-left: auto;
+  font: var(--text-body-strong);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.toolbar > :first-child {
+  min-width: 0;
+}
+
+.scroller {
+  overflow-x: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control-lg);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table thead th {
+  padding: 10px;
+  background: var(--surface-soft);
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table tbody td {
+  padding: 12px 10px;
+  border-top: 1px solid var(--color-line);
+  vertical-align: top;
+}
+
+.rowNumber,
+.id {
+  font: 600 11.5px/1.5 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rowNumber {
+  color: var(--color-muted);
+}
+
+.muted {
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.titleCol {
+  width: 50%;
+}
+
+.rowTitle {
+  font: var(--text-body-strong);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin-top: 4px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.diff {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--surface-soft);
+}
+
+.diff > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.diff dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.diff dd {
+  margin: 0;
+  font: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+.before {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
+.after {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.issues {
+  margin-top: 6px;
+}
+
+.issueError {
+  color: var(--color-coral-strong);
+  font-weight: 700;
+}
+
+.issueWarning {
+  color: var(--color-muted);
+}
+
+.decision {
+  height: 32px;
+  max-width: 140px;
+  padding: 0 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.decisionPending {
+  border-color: var(--color-coral);
+  color: var(--color-coral-strong);
+}
+
+.pendingNote,
+.readyNote {
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.pendingNote {
+  color: var(--color-coral-strong);
+}
+
+.readyNote {
+  color: var(--color-sky-strong);
+}
+
+/* 대화상자 footer 안에서는 안내 문구가 남는 공간을 차지하고 버튼을 오른쪽으로 민다. */
+footer .pendingNote,
+footer .readyNote {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 반영 확인 */
+.confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.confirmList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.confirmList > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.confirmList dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.confirmList dd {
+  margin: 0;
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.error {
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-coral-strong);
+}
+
+.done {
+  display: grid;
+  gap: 8px;
+  line-height: 1.7;
+}
+
+.doneTitle {
+  font: var(--text-body-strong);
+  color: var(--color-sky-strong);
+}
+
+@media (max-width: 560px) {
+  .mappingGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .confirmList > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

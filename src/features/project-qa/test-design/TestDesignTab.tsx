@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, FileText, Sparkles } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, Sparkles, Upload } from 'lucide-react';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
 import { testPerspectiveLabel } from '@/domain/labels';
 import type { TestCase, TestPerspective } from '@/domain/types';
@@ -12,6 +12,7 @@ import { useProjectContext } from '../projectContext';
 import { ChangeImpactPanel } from './ChangeImpactPanel';
 import { TestCaseTable } from './TestCaseTable';
 import { TemplateSetupDialog, type TemplateSetupMode } from './TemplateSetupDialog';
+import { TestAssetImportDialog } from './TestAssetImportDialog';
 import styles from './TestDesignTab.module.css';
 
 type CaseFilter = 'all' | 'draft' | 'reviewed' | 'confirm' | 'duplicate' | 'needs_review' | 'deprecated';
@@ -35,6 +36,7 @@ export function TestDesignTab() {
     searchParams.get('entry') === 'description' ? 'description' : searchParams.get('panel') === 'template' ? 'existing_tc' : null;
   const [setupMode, setSetupMode] = useState<TemplateSetupMode | null>(initialSetup);
   const [filter, setFilter] = useState<CaseFilter>('all');
+  const [importOpen, setImportOpen] = useState(false);
 
   const data = useRepositoryData(
     async (repos) => ({
@@ -126,15 +128,20 @@ export function TestDesignTab() {
           title="TC 초안"
           meta={`${counts.all}개 · 검토 완료 ${counts.reviewed} · 중복 후보 ${counts.duplicate}`}
           action={
-            <Button size="sm" variant="secondary" icon={<Download aria-hidden />} disabled title="XLSX 내보내기는 다음 단계에서 연결돼요">
-              고객사 양식으로 내보내기
-            </Button>
+            <div className={styles.headerActions}>
+              <Button size="sm" variant="secondary" icon={<Upload aria-hidden />} onClick={() => setImportOpen(true)}>
+                TC 가져오기
+              </Button>
+              <Button size="sm" variant="secondary" icon={<Download aria-hidden />} disabled title="XLSX 내보내기는 다음 단계에서 연결돼요">
+                고객사 양식으로 내보내기
+              </Button>
+            </div>
           }
         />
         {testCases.length === 0 ? (
           <StateMessage
             title="아직 TC 초안이 없어요."
-            description="위 세 가지 방법 중 하나로 시작하세요. AI가 만든 초안은 사람이 검토하기 전까지 확정되지 않아요."
+            description="위 세 가지 방법 중 하나로 시작하거나 고객사가 쓰던 TC 파일을 가져오세요. AI가 만든 초안은 사람이 검토하기 전까지 확정되지 않아요."
           />
         ) : (
           <>
@@ -160,6 +167,8 @@ export function TestDesignTab() {
       </section>
 
       <ChangeImpactPanel projectId={project.id} testCases={testCases} deliverables={deliverables} />
+
+      {importOpen && <TestAssetImportDialog open projectId={project.id} testCases={testCases} onClose={() => setImportOpen(false)} />}
 
       {setupMode && (
         <TemplateSetupDialog open mode={setupMode} project={project} currentTemplate={template} onClose={() => setSetupMode(null)} key={setupMode} />
