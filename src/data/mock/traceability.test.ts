@@ -68,31 +68,32 @@ describe('요구사항 → 테스트 조건 → TC 추적', () => {
 });
 
 describe('산출물 revision', () => {
+  // seed에는 기획서 v1.4(dlv-plan-pdf) → v1.5(dlv-plan-pdf-v15) revision이 이미 있다.
   it('기존 산출물의 새 버전은 이전 버전과 연결되고, 별도 신규 산출물과 구분된다', async () => {
     const repos = createMockRepositories();
-    const v15 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.5.pdf', version: 'v1.5', previousRevisionId: 'dlv-plan-pdf' });
-    const v16 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.6.pdf', version: 'v1.6', previousRevisionId: v15.id });
+    const v16 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.6.pdf', version: 'v1.6', previousRevisionId: 'dlv-plan-pdf-v15' });
+    const v17 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.7.pdf', version: 'v1.7', previousRevisionId: v16.id });
     const separate = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '결제_기획_v1.0.pdf', version: 'v1.0' });
 
     const deliverables = await repos.deliverables.listByProject(PROJECT_A);
-    expect(deliverableRevisionChain(deliverables, v15.id).map((item) => item.version)).toEqual(['v1.4', 'v1.5', 'v1.6']);
-    expect(deliverableRevisionChain(deliverables, 'dlv-plan-pdf').map((item) => item.id)).toEqual(['dlv-plan-pdf', v15.id, v16.id]);
+    expect(deliverableRevisionChain(deliverables, v16.id).map((item) => item.version)).toEqual(['v1.4', 'v1.5', 'v1.6', 'v1.7']);
+    expect(deliverableRevisionChain(deliverables, 'dlv-plan-pdf').map((item) => item.id)).toEqual(['dlv-plan-pdf', 'dlv-plan-pdf-v15', v16.id, v17.id]);
     expect(separate.previousRevisionId).toBeUndefined();
     expect(deliverableRevisionChain(deliverables, separate.id)).toEqual([separate]);
   });
 
   it('이미 다음 버전이 있는 산출물에서 갈라지는 revision은 만들 수 없다', async () => {
     const repos = createMockRepositories();
-    const v15 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.5.pdf', version: 'v1.5', previousRevisionId: 'dlv-plan-pdf' });
+    // v1.4 → v1.5가 있으므로 v1.4에서 또 갈라질 수 없다.
     await expect(
       repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.5b.pdf', version: 'v1.5b', previousRevisionId: 'dlv-plan-pdf' }),
     ).rejects.toThrow('이미 다음 버전');
 
     // 실패한 요청은 저장되지 않고, 최신 버전에서 이어 붙이는 정상 흐름은 계속 통과한다.
-    const v16 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.6.pdf', version: 'v1.6', previousRevisionId: v15.id });
+    const v16 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.6.pdf', version: 'v1.6', previousRevisionId: 'dlv-plan-pdf-v15' });
     const deliverables = await repos.deliverables.listByProject(PROJECT_A);
     expect(deliverables.filter((item) => item.previousRevisionId === 'dlv-plan-pdf')).toHaveLength(1);
-    expect(deliverableRevisionChain(deliverables, 'dlv-plan-pdf').map((item) => item.id)).toEqual(['dlv-plan-pdf', v15.id, v16.id]);
+    expect(deliverableRevisionChain(deliverables, 'dlv-plan-pdf').map((item) => item.id)).toEqual(['dlv-plan-pdf', 'dlv-plan-pdf-v15', v16.id]);
   });
 
   it('다른 프로젝트나 없는 산출물을 이전 버전으로 지정할 수 없다', async () => {

@@ -195,6 +195,51 @@ export interface TestResult {
   note?: string;
 }
 
+/* 변경 영향 분석 — 새 산출물이 들어왔을 때 기존 자산 기준으로 만든 "제안". 실제 요구사항·TC는 바꾸지 않는다. */
+export type RequirementChangeKind = 'added' | 'modified' | 'removed' | 'unchanged';
+
+export interface RequirementChange {
+  id: string;
+  kind: RequirementChangeKind;
+  /** 기존 요구사항. added가 아니면 필수이며 modified는 이 identity를 유지한다. */
+  requirementId?: string;
+  /** 새 분석 결과 문장. added·modified에서 사용한다. */
+  proposedText?: string;
+  feature: string;
+  sourceRefs: SourceRef[];
+  note?: string;
+}
+
+export type TestImpactKind = 'create' | 'modify' | 'keep' | 'deprecate' | 'duplicate_candidate';
+
+export interface TestImpact {
+  id: string;
+  kind: TestImpactKind;
+  /** 대상 기존 TC. create가 아니면 필수. duplicate_candidate는 비슷한 기존 TC를 가리킨다. */
+  testCaseId?: string;
+  requirementChangeIds: string[];
+  testConditionIds: string[];
+  proposedTitle?: string;
+  proposedExpectedResult?: string;
+  reason: string;
+}
+
+export type ChangeAnalysisStatus = 'draft' | 'reviewed';
+
+/** 하나의 분석 작업 단위. 어떤 산출물을 무엇과 비교했는지와 제안 결과를 함께 묶는다. */
+export interface ChangeAnalysis {
+  id: string;
+  projectId: string;
+  /** 분석 기준 산출물(또는 revision) */
+  targetDeliverableId: string;
+  /** 비교한 이전 revision. 별도 신규 산출물이면 없고, 프로젝트의 기존 자산 전체와 비교한다. */
+  baselineDeliverableId?: string;
+  status: ChangeAnalysisStatus;
+  createdAt: string;
+  requirementChanges: RequirementChange[];
+  testImpacts: TestImpact[];
+}
+
 /* 이슈 / 확인사항 */
 export type IssueType = 'defect' | 'question';
 export type IssueStatus = 'open' | 'fixed' | 'closed' | 'waiting' | 'checking' | 'answered';

@@ -158,6 +158,12 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
       },
     },
 
+    changeAnalyses: {
+      async listByProject(projectId) {
+        return db.changeAnalyses.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt));
+      },
+    },
+
     testConditions: {
       async listByProject(projectId) {
         return db.testConditions.filter((item) => item.projectId === projectId);
