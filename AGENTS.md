@@ -187,22 +187,24 @@
   - PR 성격에 맞는 prefix를 고르고, 제목은 한국어로 간결하게 요약한다.
   - PR 제목이 이미 올바른 Conventional Commit 형식이면 그 제목을 그대로 subject로 사용해도 된다.
   - 실행 예: `gh pr merge <N> --merge --delete-branch --subject "<conventional commit title>"`
-- 한글 merge commit subject는 인코딩이 보존되는 실행 경로로 전달한다. 인코딩 손상은 조용히 일어나고 이미 저장된 제목은 원문을 복구할 수 없다.
-  - PowerShell 등 대화형 셸에서 직접 실행하는 것은 허용한다. 특정 셸 하나를 강제하지 않는다.
-  - Windows PowerShell 5.1에서 UTF-8 BOM 없이 저장된 `.ps1` 파일로 한글 `--subject`를 전달하지 않는다. 한글이 깨져 전달될 수 있다.
-  - 병합 직후 GitHub에 저장된 merge commit 제목을 다시 조회해 한글 깨짐이나 예상하지 못한 문자(`?` 등)가 없는지 확인한다.
+- 한글 merge commit subject는 인코딩이 보존되는 경로로 전달한다. 인코딩 손상은 조용히 일어나고 이미 저장된 제목은 원문을 복구할 수 없다.
+  - 이 Windows 개발 환경에서 실제로 검증된 기본 경로는 **Git Bash + GitHub CLI 직접 전달**이다(PR #12에서 전달 문자열과 저장된 제목이 모두 원문과 일치함). 자동 병합은 이 경로를 우선 사용한다.
+  - PowerShell은 금지하지 않지만 한글 subject 자동 전달의 기본 경로로 쓰지 않는다. Windows PowerShell 5.1은 native command로 넘기는 한글 인자와 출력의 UTF-8 처리가 보장되지 않으며, 특히 UTF-8 BOM 없이 저장된 `.ps1` 파일로 전달하면 한글이 깨진다(PR #8, #10에서 확인된 유형의 손상). 이 경로로 자동 병합하지 않는다.
+  - 다른 셸이나 스크립트를 쓰려면 먼저 한글 인자가 원문 그대로 전달되는지 확인하고, 어떤 경로든 아래 병합 후 확인을 반드시 거친다.
+  - 병합 직후 GitHub에 저장된 merge commit의 `commit.message` 첫 줄을 조회해 PR 제목과 정확히 같은지 확인한다. 한글이 깨졌거나 `?` 등 의도하지 않은 문자가 있으면 실패로 간주한다.
   - 제목 검증에 실패하면 다음 작업을 진행하지 않고 사용자 확인 상태로 둔다. 기존 기본 브랜치 기록은 다시 쓰지 않는다.
-  - 병합 후 확인 예(PowerShell):
+  - 실행·확인 예(Git Bash):
 
-    ```powershell
-    $title = gh pr view <N> --json title --jq .title
+    ```bash
+    title="$(gh pr view <N> --json title --jq .title)"
     gh pr merge <N> --merge --delete-branch --subject "$title"
 
     git switch main
     git pull --ff-only origin main
 
-    $sha = git rev-parse HEAD
-    gh api "repos/yoobilee/looma/commits/$sha" --jq ".commit.message"
+    sha="$(git rev-parse HEAD)"
+    stored="$(gh api "repos/yoobilee/looma/commits/$sha" --jq .commit.message | head -1)"
+    [ "$stored" = "$title" ] && echo "OK" || echo "MISMATCH: $stored"
     ```
 - CI 실패를 단순 재실행, 시간 경과, 우회 설정으로 통과시키고 병합하지 않는다. 원인을 해결하거나 사용자 판단을 받는다.
 - 조건 확인에 실패하거나 판단이 불확실하면 병합하지 않고 사용자 확인 상태로 둔다(fail-closed).
