@@ -1,5 +1,7 @@
 .page {
   display: grid;
+  /* 암묵적 열은 내용의 최소 너비(기능별 표의 min-width 720px 등)까지 늘어나 좁은 화면에서 페이지 전체를 밀어낸다. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 48px;
 }
 
@@ -63,7 +65,10 @@
 }
 
 .fileMeta {
-  flex: 1;
+  /* 좁은 화면에서는 파일 정보가 좁은 열에 눌리지 않고 다음 줄로 내려간다. */
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font: var(--text-caption);
   color: var(--color-muted);
 }
@@ -365,5 +370,10 @@
 
   .figures dd {
     font-size: 28px;
+  }
+
+  /* 수행률 · 통과율은 한 줄로 보이도록 자기 줄을 차지한다. */
+  .figures .rates {
+    grid-column: 1 / -1;
   }
 }
