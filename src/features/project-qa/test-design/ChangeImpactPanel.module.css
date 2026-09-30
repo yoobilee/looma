@@ -98,9 +98,151 @@
   justify-self: start;
 }
 
+.itemBody {
+  min-width: 0;
+}
+
 .itemTitle {
   font: var(--text-body);
   font-weight: 600;
+}
+
+/* 판단 버튼: 선택된 값이 색과 aria-pressed로 함께 드러난다. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.choice {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--color-ink);
+  font: var(--text-caption);
+  font-size: 12px;
+  font-weight: 700;
+  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.choice:hover:not(:disabled) {
+  border-color: var(--color-sky);
+}
+
+.choice[aria-pressed='true'] {
+  border-color: var(--color-sky);
+  background: var(--color-sky-soft);
+  color: var(--color-sky-strong);
+}
+
+.choice:focus-visible {
+  outline: 2px solid var(--color-sky);
+  outline-offset: 2px;
+}
+
+.choice:disabled {
+  opacity: 0.55;
+}
+
+.decisionResult {
+  margin-top: 6px;
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-sky-strong);
+}
+
+.decisionPending {
+  color: var(--color-coral-strong);
+}
+
+/* 판단 조합 모순: 어느 판단을 맞춰야 하는지 항목 옆에 보여 준다. */
+.conflictNote {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-coral);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--color-coral-soft);
+  color: var(--color-coral-strong);
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.statusRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.statusRow .caption {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.actionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-line);
+}
+
+.pendingNote,
+.readyNote {
+  flex: 1 1 200px;
+  min-width: 0;
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.pendingNote {
+  color: var(--color-coral-strong);
+}
+
+.readyNote {
+  color: var(--color-muted);
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--color-coral-soft);
+  color: var(--color-coral-strong);
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.applyList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.applyList > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+}
+
+.applyList dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.applyList dd {
+  font: var(--text-body-strong);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .proposal {

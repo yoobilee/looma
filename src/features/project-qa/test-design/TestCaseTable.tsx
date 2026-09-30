@@ -102,7 +102,7 @@ export function TestCaseTable({ testCases, deliverables }: TestCaseTableProps) {
             return (
               <Fragment key={testCase.id}>
                 <tr className={[expanded ? styles.expandedRow : '', testCase.status === 'deprecated' ? styles.deprecatedRow : ''].join(' ').trim() || undefined}>
-                  <td className={styles.id}>{testCase.externalId}</td>
+                  <td className={styles.id}>{testCase.externalId ?? <span className={styles.muted}>미지정</span>}</td>
                   <td className={styles.muted}>{testPerspectiveLabel[testCase.category]}</td>
                   <td>{testCase.depth[0]}</td>
                   <td>{testCase.depth[1]}</td>

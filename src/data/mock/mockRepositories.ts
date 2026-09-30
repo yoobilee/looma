@@ -1,5 +1,13 @@
 import type { Activity, ActivityType, ScratchItem } from '@/domain/types';
 import { testCaseStatusLabel } from '@/domain/labels';
+import {
+  decisionConflictMessage,
+  decisionConflicts,
+  pendingDecisionCount,
+  planChangeApplication,
+  requirementChangeNeedsDecision,
+  testImpactNeedsDecision,
+} from '@/domain/changeImpact';
 import type { Repositories } from '../repositories/types';
 import { createSeed, type SeedData } from './seed';
 
@@ -42,6 +50,14 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
       createdAt: nowIso(),
       ...extra,
     });
+  };
+
+  // 판단은 draft 분석에서만 바꿀 수 있다.
+  const draftAnalysis = (analysisId: string) => {
+    const analysis = db.changeAnalyses.find((item) => item.id === analysisId);
+    if (!analysis) throw notFound('변경 영향 분석', analysisId);
+    if (analysis.status !== 'draft') throw new Error('검토를 완료한 분석은 판단을 바꿀 수 없어요.');
+    return analysis;
   };
 
   const isAlive = (item: ScratchItem) => !!item.pinnedAt || !item.expiresAt || new Date(item.expiresAt) > new Date();
@@ -161,6 +177,70 @@ export function createMockRepositories(seed: SeedData = createSeed()): Repositor
     changeAnalyses: {
       async listByProject(projectId) {
         return db.changeAnalyses.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt));
+      },
+      async updateRequirementDecision(analysisId, changeId, decision) {
+        const analysis = draftAnalysis(analysisId);
+        const change = analysis.requirementChanges.find((item) => item.id === changeId);
+        if (!change) throw notFound('요구사항 변경', changeId);
+        if (!requirementChangeNeedsDecision(change)) throw new Error('유지 항목은 판단하지 않아요.');
+        change.decision = decision;
+        emit();
+        return analysis;
+      },
+      async updateTestImpactDecision(analysisId, impactId, decision) {
+        const analysis = draftAnalysis(analysisId);
+        const impact = analysis.testImpacts.find((item) => item.id === impactId);
+        if (!impact) throw notFound('TC 영향', impactId);
+        if (!testImpactNeedsDecision(impact)) throw new Error('유지·중복 후보 항목은 수락/제외로 판단하지 않아요.');
+        impact.decision = decision;
+        emit();
+        return analysis;
+      },
+      async resolveDuplicate(analysisId, impactId, resolution) {
+        const analysis = draftAnalysis(analysisId);
+        const impact = analysis.testImpacts.find((item) => item.id === impactId);
+        if (!impact) throw notFound('TC 영향', impactId);
+        if (impact.kind !== 'duplicate_candidate') throw new Error('중복 후보 항목만 처리 방법을 고를 수 있어요.');
+        impact.duplicateResolution = resolution;
+        emit();
+        return analysis;
+      },
+      async markReviewed(analysisId) {
+        const analysis = draftAnalysis(analysisId);
+        const pending = pendingDecisionCount(analysis);
+        if (pending > 0) throw new Error(`판단하지 않은 항목이 ${pending}건 있어요.`);
+        const conflicts = decisionConflicts(analysis);
+        if (conflicts.length > 0) throw new Error(decisionConflictMessage(conflicts.length));
+        analysis.status = 'reviewed';
+        analysis.reviewedAt = nowIso();
+        emit();
+        return analysis;
+      },
+      async apply(analysisId) {
+        const analysis = db.changeAnalyses.find((item) => item.id === analysisId);
+        if (!analysis) throw notFound('변경 영향 분석', analysisId);
+        const now = nowIso();
+        // 먼저 전부 계산하고 검증한다. 여기서 실패하면 db는 그대로다.
+        const plan = planChangeApplication(analysis, db, {
+          now,
+          createId,
+          templateId: db.projects.find((item) => item.id === analysis.projectId)?.tcTemplateId,
+        });
+        db.requirements = plan.requirements;
+        db.testCases = plan.testCases;
+        analysis.status = 'applied';
+        analysis.appliedAt = now;
+        analysis.appliedSummary = plan.summary;
+        const target = db.deliverables.find((item) => item.id === analysis.targetDeliverableId);
+        const { summary } = plan;
+        record('changes_applied', `${target?.title ?? '산출물'} 변경사항 반영`, {
+          projectId: analysis.projectId,
+          metadata: {
+            detail: `요구사항 ${summary.requirementsAdded + summary.requirementsModified + summary.requirementsRemoved} · TC ${summary.testCasesCreated + summary.testCasesModified + summary.testCasesDeprecated}`,
+          },
+        });
+        emit();
+        return analysis;
       },
     },
 

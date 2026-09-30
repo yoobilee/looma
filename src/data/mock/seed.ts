@@ -429,7 +429,9 @@ export function createSeed() {
   for (const item of testCases) item.status = statusOverrides[item.id] ?? item.status;
 
   // 기획서 v1.4 → v1.5 변경 영향 분석 초안. 요구사항·TC는 그대로 두고 제안만 기록한다.
+  // 판단이 필요한 항목은 모두 pending으로 시작한다. 검토 완료 후 명시적으로 반영해야 실제 자산이 바뀐다.
   const v15 = (locator: string) => [{ deliverableId: 'dlv-plan-pdf-v15', locator }];
+  const signupSteps = (input: string) => ['회원가입 화면으로 이동한다.', input, '가입 버튼을 누른다.'];
   const changeAnalyses: ChangeAnalysis[] = [
     {
       id: 'cia-plan-v15',
@@ -439,16 +441,32 @@ export function createSeed() {
       status: 'draft',
       createdAt: at(-1, 19, 20),
       requirementChanges: [
-        { id: 'rc-001', kind: 'added', feature: '회원가입', proposedText: '카카오 계정으로 간편 가입할 수 있다.', sourceRefs: v15('p.11') },
+        {
+          id: 'rc-001',
+          kind: 'added',
+          feature: '회원가입',
+          proposal: { text: '카카오 계정으로 간편 가입할 수 있다.', sourceType: 'source_explicit', needsConfirmation: false },
+          sourceRefs: v15('p.11'),
+          decision: 'pending',
+        },
         {
           id: 'rc-002',
           kind: 'modified',
           requirementId: 'req-002',
           feature: '회원가입',
-          proposedText: '비밀번호는 영문, 숫자, 특수문자를 포함해 10자 이상이어야 한다.',
+          proposal: { text: '비밀번호는 영문, 숫자, 특수문자를 포함해 10자 이상이어야 한다.', sourceType: 'source_explicit', needsConfirmation: false },
           sourceRefs: v15('p.14'),
+          decision: 'pending',
         },
-        { id: 'rc-003', kind: 'removed', requirementId: 'req-003', feature: '회원가입', sourceRefs: v15('p.15'), note: 'v1.5에서 중복 이메일 안내 문구가 빠짐 — 이메일 인증 단계로 대체됐는지 확인 필요' },
+        {
+          id: 'rc-003',
+          kind: 'removed',
+          requirementId: 'req-003',
+          feature: '회원가입',
+          sourceRefs: v15('p.15'),
+          note: 'v1.5에서 중복 이메일 안내 문구가 빠짐 — 이메일 인증 단계로 대체됐는지 확인 필요',
+          decision: 'pending',
+        },
         { id: 'rc-004', kind: 'unchanged', requirementId: 'req-001', feature: '회원가입', sourceRefs: v15('p.10') },
       ],
       testImpacts: [
@@ -457,18 +475,43 @@ export function createSeed() {
           kind: 'create',
           requirementChangeIds: ['rc-001'],
           testConditionIds: [],
-          proposedTitle: '카카오 계정으로 간편 가입 시 가입 완료',
-          proposedExpectedResult: '가입 완료 화면 노출',
+          // 근거 요구사항은 반영 때 rc-001로 새로 만들어지는 요구사항이 자동으로 연결된다.
+          newTestCase: {
+            category: 'normal_flow',
+            feature: '회원가입',
+            depth: ['회원가입', '간편 가입', '카카오'],
+            title: '카카오 계정으로 간편 가입 시 가입 완료',
+            precondition: '앱 최신 빌드 설치, 로그아웃 상태, 카카오 계정 보유',
+            steps: ['회원가입 화면으로 이동한다.', '카카오로 가입하기를 누른다.', '카카오 계정 동의를 완료한다.'],
+            expectedResult: '가입 완료 화면 노출',
+            requirementIds: [],
+            testConditionIds: [],
+            sourceRefs: v15('p.11'),
+            generationType: 'source_explicit',
+          },
           reason: '신규 요구사항을 검증할 TC가 없음',
+          decision: 'pending',
         },
         {
           id: 'ti-002',
           kind: 'create',
           requirementChangeIds: ['rc-002'],
           testConditionIds: ['cond-003'],
-          proposedTitle: '특수문자 미포함 시 오류 노출',
-          proposedExpectedResult: '"영문, 숫자, 특수문자를 포함" 안내 노출',
+          newTestCase: {
+            category: 'exception',
+            feature: '회원가입',
+            depth: ['회원가입', '비밀번호', '구성'],
+            title: '특수문자 미포함 시 오류 노출',
+            precondition: '앱 최신 빌드 설치, 로그아웃 상태',
+            steps: signupSteps('영문과 숫자만으로 10자 비밀번호를 입력한다.'),
+            expectedResult: '"영문, 숫자, 특수문자를 포함" 안내 노출',
+            requirementIds: ['req-002'],
+            testConditionIds: ['cond-003'],
+            sourceRefs: v15('p.14'),
+            generationType: 'source_explicit',
+          },
           reason: '변경된 구성 규칙에 특수문자 조건이 추가됨',
+          decision: 'pending',
         },
         {
           id: 'ti-003',
@@ -476,8 +519,9 @@ export function createSeed() {
           testCaseId: 'tc-002',
           requirementChangeIds: ['rc-002'],
           testConditionIds: ['cond-002'],
-          proposedTitle: '최소 길이 10자 입력',
+          changes: { title: '최소 길이 10자 입력', sourceRefs: v15('p.14') },
           reason: '최소 길이가 8자에서 10자로 바뀜',
+          decision: 'pending',
         },
         {
           id: 'ti-004',
@@ -485,9 +529,9 @@ export function createSeed() {
           testCaseId: 'tc-003',
           requirementChangeIds: ['rc-002'],
           testConditionIds: ['cond-002'],
-          proposedTitle: '9자 입력 시 오류 노출',
-          proposedExpectedResult: '"10자 이상 입력" 안내 노출',
+          changes: { title: '9자 입력 시 오류 노출', expectedResult: '"10자 이상 입력" 안내 노출', sourceRefs: v15('p.14') },
           reason: '경계값이 7자에서 9자로 바뀜',
+          decision: 'pending',
         },
         {
           id: 'ti-005',
@@ -504,6 +548,7 @@ export function createSeed() {
           requirementChangeIds: ['rc-003'],
           testConditionIds: ['cond-004'],
           reason: '근거 요구사항이 v1.5에서 제거 후보가 됨',
+          decision: 'pending',
         },
         {
           id: 'ti-007',
@@ -511,12 +556,28 @@ export function createSeed() {
           testCaseId: 'tc-001',
           requirementChangeIds: ['rc-002'],
           testConditionIds: ['cond-001'],
-          proposedTitle: '바뀐 규칙에 맞는 비밀번호로 가입 완료',
+          // 기존 SIGN-001을 고칠지, 별도 TC로 만들지 사람이 고른다.
+          changes: { title: '바뀐 규칙에 맞는 비밀번호로 가입 완료', sourceRefs: v15('p.14') },
+          newTestCase: {
+            category: 'normal_flow',
+            feature: '회원가입',
+            depth: ['회원가입', '비밀번호', '유효값'],
+            title: '바뀐 규칙에 맞는 비밀번호로 가입 완료',
+            precondition: '앱 최신 빌드 설치, 로그아웃 상태',
+            steps: signupSteps('영문, 숫자, 특수문자를 포함한 10자 비밀번호를 입력한다.'),
+            expectedResult: '가입 완료 화면 노출',
+            requirementIds: ['req-001', 'req-002'],
+            testConditionIds: ['cond-001'],
+            sourceRefs: v15('p.14'),
+            generationType: 'source_explicit',
+          },
           reason: '기존 SIGN-001과 검증 내용이 같아 신규 대신 수정할지 결정 필요',
+          duplicateResolution: 'pending',
         },
       ],
     },
   ];
+
 
   // 고객사 Excel에서 수행한 결과 파일을 가져왔다고 가정한 데이터.
   // 외부 파일에는 Looma에서 만들지 않은 기존 TC도 함께 들어 있다.

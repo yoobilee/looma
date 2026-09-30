@@ -2,12 +2,14 @@ import type {
   ActivityType,
   ChangeAnalysisStatus,
   DeliverableType,
+  DuplicateResolution,
   IssueStatus,
   IssueType,
   Platform,
   ProjectStage,
   ProjectStatus,
   RequirementChangeKind,
+  ReviewDecision,
   TestCaseStatus,
   TestImpactKind,
   ScratchLinkTarget,
@@ -136,8 +138,22 @@ export const testImpactLabel: Record<TestImpactKind, string> = {
 };
 
 export const changeAnalysisStatusLabel: Record<ChangeAnalysisStatus, string> = {
-  draft: '검토 전 초안',
-  reviewed: '검토 완료',
+  draft: '검토 중',
+  reviewed: '검토 완료 · 반영 전',
+  applied: '반영 완료',
+};
+
+export const reviewDecisionLabel: Record<ReviewDecision, string> = {
+  pending: '판단 필요',
+  accepted: '수락',
+  rejected: '제외',
+};
+
+export const duplicateResolutionLabel: Record<DuplicateResolution, string> = {
+  pending: '판단 필요',
+  modify_existing: '기존 TC 수정',
+  create_separate: '별도 신규 TC',
+  excluded: '제외',
 };
 
 export const testPerspectiveLabel: Record<TestPerspective, string> = {
@@ -223,4 +239,5 @@ export const activityTypeLabel: Record<ActivityType, string> = {
   issue_created: '이슈 등록',
   project_changed: '프로젝트 변경',
   knowledge_saved: '업무 지식',
+  changes_applied: '변경사항 반영',
 };
