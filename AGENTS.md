@@ -187,6 +187,23 @@
   - PR 성격에 맞는 prefix를 고르고, 제목은 한국어로 간결하게 요약한다.
   - PR 제목이 이미 올바른 Conventional Commit 형식이면 그 제목을 그대로 subject로 사용해도 된다.
   - 실행 예: `gh pr merge <N> --merge --delete-branch --subject "<conventional commit title>"`
+- 한글 merge commit subject는 인코딩이 보존되는 실행 경로로 전달한다. 인코딩 손상은 조용히 일어나고 이미 저장된 제목은 원문을 복구할 수 없다.
+  - PowerShell 등 대화형 셸에서 직접 실행하는 것은 허용한다. 특정 셸 하나를 강제하지 않는다.
+  - Windows PowerShell 5.1에서 UTF-8 BOM 없이 저장된 `.ps1` 파일로 한글 `--subject`를 전달하지 않는다. 한글이 깨져 전달될 수 있다.
+  - 병합 직후 GitHub에 저장된 merge commit 제목을 다시 조회해 한글 깨짐이나 예상하지 못한 문자(`?` 등)가 없는지 확인한다.
+  - 제목 검증에 실패하면 다음 작업을 진행하지 않고 사용자 확인 상태로 둔다. 기존 기본 브랜치 기록은 다시 쓰지 않는다.
+  - 병합 후 확인 예(PowerShell):
+
+    ```powershell
+    $title = gh pr view <N> --json title --jq .title
+    gh pr merge <N> --merge --delete-branch --subject "$title"
+
+    git switch main
+    git pull --ff-only origin main
+
+    $sha = git rev-parse HEAD
+    gh api "repos/yoobilee/looma/commits/$sha" --jq ".commit.message"
+    ```
 - CI 실패를 단순 재실행, 시간 경과, 우회 설정으로 통과시키고 병합하지 않는다. 원인을 해결하거나 사용자 판단을 받는다.
 - 조건 확인에 실패하거나 판단이 불확실하면 병합하지 않고 사용자 확인 상태로 둔다(fail-closed).
 - 이 정책을 추가하거나 변경하는 PR은 자동 병합 대상이 아니며 사용자 확인 후 병합한다.
