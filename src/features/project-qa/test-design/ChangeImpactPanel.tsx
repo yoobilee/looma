@@ -86,8 +86,8 @@ export function ChangeImpactPanel({ projectId, testCases, deliverables }: Change
         title="변경 영향 분석"
         meta={`${target?.title ?? ''} · ${comparison} · ${changeAnalysisStatusLabel[analysis.status]}`}
         action={
-          <ButtonLink to={`/projects/${projectId}/requirements?filter=changes`} variant="secondary" size="sm">
-            변경된 요구사항 보기
+          <ButtonLink to={`/projects/${projectId}/requirements`} variant="secondary" size="sm">
+            요구사항 목록 보기
           </ButtonLink>
         }
       />
