@@ -81,6 +81,20 @@ describe('산출물 revision', () => {
     expect(deliverableRevisionChain(deliverables, separate.id)).toEqual([separate]);
   });
 
+  it('이미 다음 버전이 있는 산출물에서 갈라지는 revision은 만들 수 없다', async () => {
+    const repos = createMockRepositories();
+    const v15 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.5.pdf', version: 'v1.5', previousRevisionId: 'dlv-plan-pdf' });
+    await expect(
+      repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.5b.pdf', version: 'v1.5b', previousRevisionId: 'dlv-plan-pdf' }),
+    ).rejects.toThrow('이미 다음 버전');
+
+    // 실패한 요청은 저장되지 않고, 최신 버전에서 이어 붙이는 정상 흐름은 계속 통과한다.
+    const v16 = await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v1.6.pdf', version: 'v1.6', previousRevisionId: v15.id });
+    const deliverables = await repos.deliverables.listByProject(PROJECT_A);
+    expect(deliverables.filter((item) => item.previousRevisionId === 'dlv-plan-pdf')).toHaveLength(1);
+    expect(deliverableRevisionChain(deliverables, 'dlv-plan-pdf').map((item) => item.id)).toEqual(['dlv-plan-pdf', v15.id, v16.id]);
+  });
+
   it('다른 프로젝트나 없는 산출물을 이전 버전으로 지정할 수 없다', async () => {
     const repos = createMockRepositories();
     await expect(repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: 'x', previousRevisionId: 'missing' })).rejects.toThrow('찾을 수 없어요');
