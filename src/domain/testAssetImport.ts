@@ -247,8 +247,8 @@ const compositeKey = (content: { feature?: string; title?: string; precondition?
 
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item, index) => normalizeText(item) === normalizeText(b[index]));
 
-/** 파일이 소유한 필드 중 기존 TC와 실제로 다른 것만 모은다. 매핑하지 않은 필드는 기존 값을 그대로 둔다. */
-function contentChanges(row: TestAssetImportRow, target: TestCase, fields: Set<TestAssetImportField>): Partial<TestAssetContent> {
+/** 파일이 소유한 필드 중 기존 TC와 실제로 다른 것만 모은다. 매핑하지 않은 필드는 기존 값을 그대로 둔다. 원본 형식 내보내기도 같은 기준으로 바뀐 칸을 고른다. */
+export function contentChanges(row: TestAssetImportRow, target: TestCase, fields: Set<TestAssetImportField>): Partial<TestAssetContent> {
   const changes: Partial<TestAssetContent> = {};
   if (row.category && row.category !== target.category) changes.category = row.category;
   if (row.feature && normalizeText(row.feature) !== normalizeText(target.feature)) changes.feature = row.feature;

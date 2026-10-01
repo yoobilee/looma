@@ -1,0 +1,44 @@
+.action {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.unavailable,
+.notice {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.result,
+.failed {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+
+.result p,
+.failed p {
+  margin: 0;
+}
+
+.result > p:first-child {
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.failed {
+  color: var(--status-fail);
+  font-weight: 600;
+}
+
+.failed ul {
+  margin: 0;
+  padding-left: 18px;
+  font-weight: 500;
+}
