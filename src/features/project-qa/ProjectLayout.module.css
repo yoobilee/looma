@@ -85,7 +85,7 @@
 /* 단계 탭 — 네비게이션이므로 NavLink + aria-current */
 .tabs {
   display: grid;
-  grid-template-columns: repeat(6, minmax(max-content, 1fr));
+  grid-template-columns: repeat(7, minmax(max-content, 1fr));
   gap: 4px;
   padding: 6px;
   border: 1px solid var(--color-line);
@@ -181,7 +181,7 @@
     margin-top: 28px;
   }
 
-  /* 좁은 화면에서는 여섯 단계를 두 줄로 모두 보여 준다. 가로로 숨은 단계가 없게 한다. */
+  /* 좁은 화면에서는 일곱 탭을 여러 줄로 모두 보여 준다. 가로로 숨은 단계가 없게 한다. */
   .tabs {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     overflow-x: visible;

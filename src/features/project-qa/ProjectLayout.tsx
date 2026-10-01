@@ -12,13 +12,15 @@ import { DeliverableCreateDialog } from './deliverables/DeliverableCreateDialog'
 import type { ProjectOutletContext } from './projectContext';
 import styles from './ProjectLayout.module.css';
 
-const tabs = [
+const tabs: { path: string; label: string; search: string; supplementary?: boolean }[] = [
   { path: '', label: '산출물', search: '산출물 검색' },
   { path: 'requirements', label: '요구사항 분석', search: '기능, 요구사항, 확인 필요 검색' },
   { path: 'test-design', label: '테스트 설계', search: 'TC, 기능, 근거 검색' },
   { path: 'results', label: '수행 결과', search: 'TC, 결과, 이슈 검색' },
   { path: 'issues', label: '이슈 / 확인사항', search: '이슈, 질문, 기능 검색' },
   { path: 'records', label: '기록', search: '프로젝트 활동 검색' },
+  // 작업 단계가 아닌 보조 정보라 단계 번호를 붙이지 않는다.
+  { path: 'import-history', label: '가져오기 이력', search: '파일명, 가져오기 이력 검색', supplementary: true },
 ];
 
 /** 프로젝트 QA 작업공간: 산출물 → 요구사항 분석 → 테스트 설계 → 수행 결과 → 이슈/확인사항 → 기록 */
@@ -103,9 +105,11 @@ export function ProjectLayout() {
             end
             className={({ isActive }) => `${styles.tab} ${isActive ? styles.active : ''}`}
           >
-            <span className={styles.step} aria-hidden>
-              {index + 1}
-            </span>
+            {!tab.supplementary && (
+              <span className={styles.step} aria-hidden>
+                {index + 1}
+              </span>
+            )}
             {tab.label}
           </NavLink>
         ))}
