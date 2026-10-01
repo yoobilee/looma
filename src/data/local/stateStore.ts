@@ -33,6 +33,7 @@ export interface StateStore {
   /**
    * 저장된 revision이 expectedRevision과 같을 때만 원본 bytes와 상태를 한 transaction으로 쓴다.
    * 다르면 conflict로 거부하고 아무것도 쓰지 않는다.
+   * 원본 bytes는 새로 넣기만 한다. 같은 id가 이미 있으면 ConstraintError로 거부하고 아무것도 쓰지 않는다(원본은 덮어쓰지 않는다).
    */
   commit(input: CommitInput): Promise<SavedRevision>;
   /** 저장된 상태와 원본 bytes를 모두 지우고 새 상태를 쓴다. revision은 이전보다 커서 다른 탭이 변경을 알 수 있다. */
@@ -65,6 +66,11 @@ export function createMemoryStateStore(initial?: StoredAppState): StateStore & {
     async commit(input) {
       const stored = state as StoredAppState | undefined;
       if (!stored || stored.revision !== input.expectedRevision) throw new PersistenceError('conflict');
+      // IndexedDB add와 같은 규칙: 이미 있거나 같은 요청 안에서 겹치는 id면 전부 거부한다.
+      const ids = (input.artifacts ?? []).map((artifact) => artifact.id);
+      if (ids.some((id, index) => artifacts.has(id) || ids.indexOf(id) !== index)) {
+        throw new DOMException('같은 key의 원본 파일이 이미 있어요.', 'ConstraintError');
+      }
       const revision = stored.revision + 1;
       const next: StoredAppState = { schemaVersion: input.schemaVersion, revision, savedAt: input.savedAt, data: structuredClone(input.data) };
       for (const artifact of input.artifacts ?? []) artifacts.set(artifact.id, artifact.bytes);

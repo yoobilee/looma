@@ -17,15 +17,10 @@ import { createSeed } from '../mock/seed';
 import { CURRENT_SCHEMA_VERSION, isStoredAppState, type AppData, type StoredAppState } from './appData';
 import { appDataMigrations, migrateAppData, type AppDataMigration } from './migrations';
 import type { StateChannel } from './stateChannel';
+import { createRandomId } from './ids';
 import { createMemoryStateStore, type ArtifactBytesInput, type StateStore } from './stateStore';
 
 const SCRATCH_LIFETIME_MS = 12 * 60 * 60 * 1000;
-
-let idCounter = 0;
-function createId(prefix: string): string {
-  idCounter += 1;
-  return `${prefix}-${Date.now().toString(36)}-${idCounter}`;
-}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -38,6 +33,29 @@ function byNewest<T>(pick: (item: T) => string) {
 function notFound(kind: string, id: string): Error {
   return new Error(`${kind}을(를) 찾을 수 없어요. (${id})`);
 }
+
+/** 바꿀 것이 없는 변경의 결과. 저장하지 않고 value만 돌려준다. */
+const UNCHANGED = Symbol('unchanged');
+type Unchanged<T> = { [UNCHANGED]: T };
+const unchanged = <T>(value: T): Unchanged<T> => ({ [UNCHANGED]: value });
+const isUnchanged = <T>(value: T | Unchanged<T>): value is Unchanged<T> => typeof value === 'object' && value !== null && UNCHANGED in value;
+
+interface MutationContext {
+  /** 상태와 같은 transaction으로 저장할 원본 파일 bytes */
+  addArtifact(artifact: ArtifactBytesInput): void;
+}
+
+/**
+ * 저장소 경계의 복사. 내부 상태의 객체 · 배열을 밖으로 내보내지 않고, 받은 입력의 배열 · 객체를 내부 상태와 공유하지 않는다.
+ * 읽기는 돌려주는 엔티티 범위만 복사한다(상태 전체를 복사하지 않는다).
+ */
+const copy = <T>(value: T): T => structuredClone(value);
+
+/** 가져오기 입력. 원본 bytes(Blob)는 바뀌지 않는 값이라 그대로 두고 나머지만 복사한다. */
+const copyImportInput = <T extends { source?: ImportSourceFileInput }>(input: T): T => {
+  const { source, ...rest } = input;
+  return { ...copy(rest), ...(source && { source: { ...source } }) } as T;
+};
 
 const emptyAppData = (): AppData => ({
   projects: [],
@@ -65,6 +83,8 @@ export interface LocalRepositoryOptions {
   channel?: StateChannel;
   /** 저장된 상태가 없을 때 쓸 처음 데이터. 기본은 지금 시각 기준 예시 데이터다. */
   createInitialData?: () => AppData;
+  /** 엔티티 ID 생성기. 기본은 암호학적 난수 UUID다. 테스트에서 같은 ID를 강제로 만들 때만 바꾼다. */
+  createId?: (prefix: string) => string;
   /** 저장 형식 버전과 이전 버전 변환. 기본은 현재 앱의 값이다. 테스트에서 변환 경로를 바꿔 볼 때 쓴다. */
   schema?: { currentVersion: number; migrations: Readonly<Record<number, AppDataMigration>> };
   /** 이미 읽어 둔 상태로 바로 시작한다(load 없이 ready). 메모리 저장소 · 테스트에서 쓴다. */
@@ -78,6 +98,7 @@ export interface LocalRepositoryOptions {
  */
 export function createLocalRepositories(options: LocalRepositoryOptions): Repositories {
   const createInitialData = options.createInitialData ?? createSeed;
+  const createId = options.createId ?? createRandomId;
   const schema = options.schema ?? { currentVersion: CURRENT_SCHEMA_VERSION, migrations: appDataMigrations };
   const { preloaded } = options;
   let db: AppData = preloaded ? structuredClone(preloaded.state.data) : emptyAppData();
@@ -115,17 +136,19 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
 
   /**
    * 복사본에서 바꾸고, 저장에 성공하면 그 복사본을 현재 상태로 쓴다.
-   * change가 던지면(검증 실패 등) 아무것도 저장하지 않는다.
+   * - change가 던지면(검증 실패 등) 아무것도 저장하지 않는다.
+   * - change가 unchanged(value)를 돌려주면 바꿀 것이 없다는 뜻이다. 저장하지 않고 revision도 올리지 않는다.
+   * - 판단은 저장 대기열 안에서, 앞선 변경이 모두 반영된 최신 상태로 한다.
+   * - 돌려주는 값은 복사본이다. 호출한 쪽이 고쳐도 저장소 상태는 바뀌지 않는다.
    */
-  const mutate = <T>(change: (draft: AppData) => T | { result: T; artifacts: ArtifactBytesInput[] }, withArtifacts = false): Promise<T> =>
+  const mutate = <T>(change: (draft: AppData, context: MutationContext) => T | Unchanged<T>): Promise<T> =>
     enqueue(async () => {
       if (status.state !== 'ready' || !store) throw new PersistenceError('unavailable', '저장소가 준비되지 않아 변경을 저장하지 않았어요.');
       if (status.stale) throw new PersistenceError('conflict');
       const draft = structuredClone(db);
-      const outcome = change(draft);
-      const { result, artifacts } = withArtifacts
-        ? (outcome as { result: T; artifacts: ArtifactBytesInput[] })
-        : { result: outcome as T, artifacts: [] as ArtifactBytesInput[] };
+      const artifacts: ArtifactBytesInput[] = [];
+      const outcome = change(draft, { addArtifact: (artifact) => artifacts.push(artifact) });
+      if (isUnchanged(outcome)) return copy(outcome[UNCHANGED]);
       try {
         const saved = await store.commit({ expectedRevision: revision, schemaVersion: schema.currentVersion, savedAt: nowIso(), data: draft, artifacts });
         db = draft;
@@ -138,7 +161,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
         throw failure;
       }
       emit();
-      return result;
+      return copy(outcome);
     });
 
   /**
@@ -269,7 +292,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
    * 원본 파일을 가져오기 기록에 붙인다. 메타데이터는 상태에, bytes는 같은 transaction의 원본 파일 저장소에 들어간다.
    * 원본 · snapshot · 열 매핑은 함께 저장되거나 함께 저장되지 않는다.
    */
-  const attachSource = (draft: AppData, projectId: string, fileName: string, table: ImportTable, source: ImportSourceFileInput) => {
+  const attachSource = (draft: AppData, context: MutationContext, projectId: string, fileName: string, table: ImportTable, source: ImportSourceFileInput) => {
     const artifact: ImportSourceArtifact = {
       id: createId('src'),
       projectId,
@@ -281,9 +304,9 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
       createdAt: nowIso(),
     };
     draft.importSourceArtifacts.push(artifact);
+    context.addArtifact({ id: artifact.id, bytes: source.bytes });
     return {
       artifact,
-      bytes: { id: artifact.id, bytes: source.bytes },
       snapshot: toImportSourceSnapshot(table, { format: source.format, fileName, sheetName: source.sheetName }),
     };
   };
@@ -298,13 +321,14 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
 
     tasks: {
       async list() {
-        return [...db.tasks];
+        return copy(db.tasks);
       },
       async get(id) {
-        return db.tasks.find((task) => task.id === id);
+        return copy(db.tasks.find((task) => task.id === id));
       },
-      create: (input) =>
-        mutate((draft) => {
+      create: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           const task = {
             id: createId('task'),
             title: input.title.trim(),
@@ -319,14 +343,14 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           draft.tasks.push(task);
           record(draft, 'task_created', `${task.title} 업무 생성`, { taskId: task.id, projectId: task.projectId, metadata: { detail: '업무 생성' } });
           return task;
-        }),
-      async updateStatus(id, status) {
-        const current = db.tasks.find((item) => item.id === id);
-        if (!current) throw notFound('업무', id);
-        if (current.status === status) return current;
-        return mutate((draft) => {
+        });
+      },
+      updateStatus: (id, status) =>
+        // 존재 확인과 "이미 같은 상태" 판단도 대기열 안에서 최신 상태로 한다. 앞선 변경이 끝나기 전의 값으로 판단하지 않는다.
+        mutate((draft) => {
           const task = draft.tasks.find((item) => item.id === id);
           if (!task) throw notFound('업무', id);
+          if (task.status === status) return unchanged(task);
           task.status = status;
           if (status === 'in_progress') {
             task.startedAt = nowIso();
@@ -339,19 +363,19 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             task.completedAt = undefined;
           }
           return task;
-        });
-      },
+        }),
     },
 
     projects: {
       async list() {
-        return [...db.projects];
+        return copy(db.projects);
       },
       async get(id) {
-        return db.projects.find((project) => project.id === id);
+        return copy(db.projects.find((project) => project.id === id));
       },
-      create: (input) =>
-        mutate((draft) => {
+      create: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           const project = {
             id: createId('proj'),
             status: 'preparing' as const,
@@ -361,15 +385,17 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           draft.projects.push(project);
           record(draft, 'project_changed', `${project.name} 프로젝트 생성`, { projectId: project.id, metadata: { detail: '프로젝트 생성' } });
           return project;
-        }),
+        });
+      },
     },
 
     deliverables: {
       async listByProject(projectId) {
-        return db.deliverables.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.importedAt));
+        return copy(db.deliverables.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.importedAt)));
       },
-      create: (input) =>
-        mutate((draft) => {
+      create: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           if (input.previousRevisionId) {
             const previous = draft.deliverables.find((item) => item.id === input.previousRevisionId);
             if (!previous || previous.projectId !== input.projectId) throw notFound('이전 버전 산출물', input.previousRevisionId);
@@ -381,33 +407,36 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           draft.deliverables.push(deliverable);
           record(draft, 'deliverable_added', `${deliverable.title} 추가`, { projectId: input.projectId, metadata: { detail: input.type.toUpperCase() } });
           return deliverable;
-        }),
+        });
+      },
     },
 
     requirements: {
       async listByProject(projectId) {
-        return db.requirements.filter((item) => item.projectId === projectId);
+        return copy(db.requirements.filter((item) => item.projectId === projectId));
       },
     },
 
     templates: {
       async get(id) {
-        return db.templates.find((template) => template.id === id);
+        return copy(db.templates.find((template) => template.id === id));
       },
-      saveForProject: (projectId, template) =>
-        mutate((draft) => {
+      saveForProject: (projectId, rawTemplate) => {
+        const template = copy(rawTemplate);
+        return mutate((draft) => {
           const saved = { id: createId('tpl'), projectId, ...template };
           draft.templates.push(saved);
           const project = draft.projects.find((item) => item.id === projectId);
           if (project) project.tcTemplateId = saved.id;
           record(draft, 'project_changed', `${saved.name} 저장`, { projectId, metadata: { detail: 'TC Template' } });
           return saved;
-        }),
+        });
+      },
     },
 
     changeAnalyses: {
       async listByProject(projectId) {
-        return db.changeAnalyses.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt));
+        return copy(db.changeAnalyses.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt)));
       },
       updateRequirementDecision: (analysisId, changeId, decision) =>
         mutate((draft) => {
@@ -477,13 +506,13 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
 
     testConditions: {
       async listByProject(projectId) {
-        return db.testConditions.filter((item) => item.projectId === projectId);
+        return copy(db.testConditions.filter((item) => item.projectId === projectId));
       },
     },
 
     testCases: {
       async listByProject(projectId) {
-        return db.testCases.filter((item) => item.projectId === projectId);
+        return copy(db.testCases.filter((item) => item.projectId === projectId));
       },
       updateStatus: (id, status) =>
         mutate((draft) => {
@@ -501,10 +530,11 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
 
     testAssetImports: {
       async listByProject(projectId) {
-        return db.testAssetImports.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.importedAt));
+        return copy(db.testAssetImports.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.importedAt)));
       },
-      apply: (input) =>
-        mutate((draft) => {
+      apply: (rawInput) => {
+        const input = copyImportInput(rawInput);
+        return mutate((draft, context) => {
           const project = draft.projects.find((item) => item.id === input.projectId);
           if (!project) throw notFound('프로젝트', input.projectId);
           // 미리보기와 같은 규칙으로 현재 TC 기준 판정을 다시 계산한다. 그 사이 TC가 바뀌었으면 계획 단계에서 거부된다.
@@ -521,7 +551,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             createId,
             templateId: project.tcTemplateId,
           });
-          const attached = input.source && attachSource(draft, input.projectId, input.fileName, input.table, input.source);
+          const attached = input.source && attachSource(draft, context, input.projectId, input.fileName, input.table, input.source);
           const session = attached
             ? { ...plan.session, artifactId: attached.artifact.id, sourceSnapshot: attached.snapshot, columnMapping: [...input.mapping] }
             : plan.session;
@@ -531,19 +561,21 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             projectId: input.projectId,
             metadata: { detail: `${session.fileName} · 신규 ${session.created} · 업데이트 ${session.updated} · 변경 없음 ${session.unchanged} · 제외 ${session.excluded}` },
           });
-          return { result: session, artifacts: attached ? [attached.bytes] : [] };
-        }, true),
+          return session;
+        });
+      },
     },
 
     testResults: {
       async listImports(projectId) {
-        return db.resultImports.filter((item) => item.projectId === projectId).sort((a, b) => a.round - b.round);
+        return copy(db.resultImports.filter((item) => item.projectId === projectId).sort((a, b) => a.round - b.round));
       },
       async listResults(importId) {
-        return db.results.filter((item) => item.importId === importId);
+        return copy(db.results.filter((item) => item.importId === importId));
       },
-      importResults: (input) =>
-        mutate((draft) => {
+      importResults: (rawInput) => {
+        const input = copyImportInput(rawInput);
+        return mutate((draft, context) => {
           const project = draft.projects.find((item) => item.id === input.projectId);
           if (!project) throw notFound('프로젝트', input.projectId);
           const templateMappings = draft.templates.find((item) => item.id === project.tcTemplateId)?.resultMappings ?? [];
@@ -563,7 +595,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             },
             { projectId: input.projectId, fileName: input.fileName, now: nowIso(), createId },
           );
-          const attached = input.source && attachSource(draft, input.projectId, input.fileName, input.table, input.source);
+          const attached = input.source && attachSource(draft, context, input.projectId, input.fileName, input.table, input.source);
           const resultImport = attached
             ? { ...plan.resultImport, artifactId: attached.artifact.id, sourceSnapshot: attached.snapshot, resultColumnMapping: [...input.mapping] }
             : plan.resultImport;
@@ -574,13 +606,14 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             projectId: input.projectId,
             metadata: { detail: resultImportSummaryText(summarizeResultImport(plan.results)) },
           });
-          return { result: resultImport, artifacts: attached ? [attached.bytes] : [] };
-        }, true),
+          return resultImport;
+        });
+      },
     },
 
     importSources: {
       async get(id) {
-        return db.importSourceArtifacts.find((item) => item.id === id);
+        return copy(db.importSourceArtifacts.find((item) => item.id === id));
       },
       async getBytes(id) {
         const artifact = db.importSourceArtifacts.find((item) => item.id === id);
@@ -598,10 +631,11 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
 
     issues: {
       async listByProject(projectId) {
-        return db.issues.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt));
+        return copy(db.issues.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt)));
       },
-      create: (input) =>
-        mutate((draft) => {
+      create: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           const issue = {
             id: createId('issue'),
             status: input.type === 'defect' ? ('open' as const) : ('waiting' as const),
@@ -614,7 +648,8 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             metadata: { detail: input.feature ?? '' },
           });
           return issue;
-        }),
+        });
+      },
       updateStatus: (id, status) =>
         mutate((draft) => {
           const issue = draft.issues.find((item) => item.id === id);
@@ -626,13 +661,14 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
 
     knowledge: {
       async list() {
-        return [...db.knowledge];
+        return copy(db.knowledge);
       },
       async get(id) {
-        return db.knowledge.find((term) => term.id === id);
+        return copy(db.knowledge.find((term) => term.id === id));
       },
-      create: (input) =>
-        mutate((draft) => {
+      create: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           const term = {
             id: createId('term'),
             examples: [],
@@ -646,22 +682,26 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           draft.knowledge.push(term);
           record(draft, 'knowledge_saved', `${term.term} 용어 추가`, { metadata: { detail: '업무 지식' } });
           return term;
-        }),
-      update: (id, input) =>
-        mutate((draft) => {
+        });
+      },
+      update: (id, rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           const term = draft.knowledge.find((item) => item.id === id);
           if (!term) throw notFound('용어', id);
           Object.assign(term, input, { updatedAt: nowIso() });
           return term;
-        }),
+        });
+      },
     },
 
     scratch: {
       async list() {
-        return db.scratch.filter(isAlive).sort(byNewest((item) => item.createdAt));
+        return copy(db.scratch.filter(isAlive).sort(byNewest((item) => item.createdAt)));
       },
-      create: (input) =>
-        mutate((draft) => {
+      create: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
           const createdAt = nowIso();
           const item = {
             id: createId('scr'),
@@ -671,7 +711,8 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           };
           draft.scratch.push(item);
           return item;
-        }),
+        });
+      },
       pin: (id, target, targetId) =>
         mutate((draft) => {
           const item = draft.scratch.find((scratchItem) => scratchItem.id === id);
@@ -711,10 +752,12 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
     activities: {
       async list(filter) {
         // 같은 시각이면 나중에 기록된 활동이 먼저 오도록 역순에서 안정 정렬한다.
-        return [...db.activities]
-          .reverse()
-          .filter((activity) => !filter?.projectId || activity.projectId === filter.projectId)
-          .sort(byNewest((activity) => activity.createdAt));
+        return copy(
+          [...db.activities]
+            .reverse()
+            .filter((activity) => !filter?.projectId || activity.projectId === filter.projectId)
+            .sort(byNewest((activity) => activity.createdAt)),
+        );
       },
     },
 
@@ -723,10 +766,12 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
         return 'not_connected';
       },
       async listUpcoming(fromIso, limit) {
-        return db.calendarEvents
-          .filter((event) => new Date(event.endAt) >= new Date(fromIso))
-          .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
-          .slice(0, limit);
+        return copy(
+          db.calendarEvents
+            .filter((event) => new Date(event.endAt) >= new Date(fromIso))
+            .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+            .slice(0, limit),
+        );
       },
     },
   };

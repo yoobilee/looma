@@ -9,7 +9,8 @@ import { PersistenceError } from '../persistenceError';
 import type { ImportSourceFileInput, PersistenceStatus, Repositories } from '../repositories/types';
 import { createSeed, PROJECT_A } from '../mock/seed';
 import { CURRENT_SCHEMA_VERSION, type AppData, type StoredAppState } from './appData';
-import { createLocalRepositories } from './localRepositories';
+import { createRandomId, uuidFromRandomBytes } from './ids';
+import { createLocalRepositories, type LocalRepositoryOptions } from './localRepositories';
 import { migrateAppData } from './migrations';
 import { createMemoryChannelHub, type StateChannel } from './stateChannel';
 import { createMemoryStateStore, type StateStore } from './stateStore';
@@ -54,7 +55,7 @@ function faultyStore(base = createMemoryStateStore()) {
 }
 
 /** 같은 저장소를 쓰는 탭 하나. load까지 마친 저장소를 돌려준다. */
-async function openTab(store: StateStore, options: { channel?: StateChannel; createInitialData?: () => AppData } = {}) {
+async function openTab(store: StateStore, options: { channel?: StateChannel; createInitialData?: () => AppData; createId?: LocalRepositoryOptions['createId'] } = {}) {
   const repos = createLocalRepositories({ openStore: async () => store, ...options });
   await repos.persistence.load();
   return repos;
@@ -78,8 +79,8 @@ function xlsxBytes(rows: string[][], sheetName: string): Uint8Array<ArrayBuffer>
   return new Uint8Array(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer);
 }
 
-async function tcImport(repos: Repositories, source?: ImportSourceFileInput, fileName = '고객사A_기존TC.xlsx') {
-  const table = toImportTable(parseCsv(csvText([TC_HEADERS, tcRow('MY-001', '닉네임 변경 시 저장 가능')]))) as ImportTable;
+async function tcImport(repos: Repositories, source?: ImportSourceFileInput, fileName = '고객사A_기존TC.xlsx', externalId = 'MY-001') {
+  const table = toImportTable(parseCsv(csvText([TC_HEADERS, tcRow(externalId, `${externalId} 닉네임 변경 시 저장 가능`)]))) as ImportTable;
   const mapping = suggestColumnMapping(table.headers);
   const analysis = analyzeTestAssetImport(table, mapping, await repos.testCases.listByProject(PROJECT_A));
   const decisions = analysis.rows.map((item) => ({ rowNumber: item.row.rowNumber, kind: item.kind, targetId: item.targetId, decision: defaultDecisionFor(item)! }));
@@ -683,5 +684,220 @@ describe('ImportSourceSnapshot', () => {
   it('JSON으로 저장했다가 읽어도 같다', () => {
     const snapshot = toImportSourceSnapshot(table, { format: 'xlsx', fileName: '고객사.xlsx', sheetName: 'TC' });
     expect(JSON.parse(JSON.stringify(snapshot))).toEqual(snapshot);
+  });
+});
+
+/* ---------- 독립 리뷰 후속: ID 충돌 · 원본 덮어쓰기 · 업무 상태 경쟁 · 참조 격리 ---------- */
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+describe('ID 생성', () => {
+  it('시각과 무관한 암호학적 난수 UUID를 쓰고, 같은 Date.now에서도 겹치지 않는다', () => {
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const ids = Array.from({ length: 2000 }, () => createRandomId('src'));
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const id of ids.slice(0, 20)) expect(id.slice('src-'.length)).toMatch(UUID_V4);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('randomUUID가 없으면 getRandomValues로 UUID를 만들고, 둘 다 없으면 약한 난수로 대신하지 않고 실패한다', () => {
+    const id = createRandomId('tc', { getRandomValues: (array) => globalThis.crypto.getRandomValues(array) });
+    expect(id.slice('tc-'.length)).toMatch(UUID_V4);
+    expect(() => createRandomId('tc', {})).toThrow('안전한 난수 생성기');
+    expect(uuidFromRandomBytes(new Uint8Array(16))).toBe('00000000-0000-4000-8000-000000000000');
+  });
+
+  it('여러 저장소 인스턴스(탭)가 같은 시각에 만든 ID도 겹치지 않는다', async () => {
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const store = createMemoryStateStore();
+      const tabA = await openTab(store);
+      const tabB = await openTab(store);
+      const fromA = await (await tcImport(tabA, { bytes: new Blob(['A 원본']), format: 'csv' }, 'a.csv', 'A-001')).apply();
+      await tabB.persistence.reloadLatest();
+      const fromB = await (await tcImport(tabB, { bytes: new Blob(['B 원본']), format: 'csv' }, 'b.csv', 'B-001')).apply();
+      expect(fromA.id).not.toBe(fromB.id);
+      expect(fromA.artifactId).not.toBe(fromB.artifactId);
+      const reloaded = await openTab(store);
+      expect(new TextDecoder().decode(await reloaded.importSources.getBytes(fromA.artifactId!))).toBe('A 원본');
+      expect(new TextDecoder().decode(await reloaded.importSources.getBytes(fromB.artifactId!))).toBe('B 원본');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('원본 파일 덮어쓰기 방지', () => {
+  it('두 탭이 같은 원본 ID를 만들어도 두 번째 가져오기는 전부 거부되고 첫 원본 · 상태는 그대로다', async () => {
+    const store = createMemoryStateStore();
+    // 두 탭이 같은 ID를 만드는 상황을 강제로 만든다.
+    const sameIds = (prefix: string) => `${prefix}-fixed`;
+    const tabA = await openTab(store, { createId: sameIds });
+    const tabB = await openTab(store, { createId: sameIds });
+
+    const first = await (await tcImport(tabA, { bytes: new Blob(['첫 번째 원본']), format: 'csv' }, 'first.csv', 'A-001')).apply();
+    expect(first.artifactId).toBe('src-fixed');
+    await tabB.persistence.reloadLatest();
+    const before = await storedState(store);
+    const testCasesInB = await tabB.testCases.listByProject(PROJECT_A);
+
+    const second = await tcImport(tabB, { bytes: new Blob(['두 번째 원본']), format: 'csv' }, 'second.csv', 'B-001');
+    await expect(second.apply()).rejects.toMatchObject({ kind: 'artifact_duplicate' });
+
+    // 저장소: revision · 상태 · 원본 bytes 모두 첫 가져오기 그대로, 두 번째 원본은 어디에도 없다.
+    expect(await storedState(store)).toEqual(before);
+    expect(store.inspect().artifactIds).toEqual(['src-fixed']);
+    expect(new TextDecoder().decode(await tabA.importSources.getBytes('src-fixed'))).toBe('첫 번째 원본');
+    // 두 번째 탭의 메모리도 바뀌지 않았다.
+    expect(await tabB.testAssetImports.listByProject(PROJECT_A)).toHaveLength(1);
+    expect(await tabB.testCases.listByProject(PROJECT_A)).toEqual(testCasesInB);
+    expect(ready(tabB).error).toContain('기존 원본 파일은 그대로');
+  });
+
+  it('수행 결과 가져오기도 같은 원본 ID면 차수 · 결과를 저장하지 않는다', async () => {
+    const store = createMemoryStateStore();
+    const sameIds = (prefix: string) => `${prefix}-fixed`;
+    const tab = await openTab(store, { createId: sameIds });
+    await (await tcImport(tab, { bytes: new Blob(['TC 원본']), format: 'csv' })).apply();
+    const importsBefore = await tab.testResults.listImports(PROJECT_A);
+
+    await expect((await resultImport(tab, { bytes: new Blob(['결과 원본']), format: 'csv' })).apply()).rejects.toMatchObject({ kind: 'artifact_duplicate' });
+    expect(await tab.testResults.listImports(PROJECT_A)).toEqual(importsBefore);
+    expect(new TextDecoder().decode(await tab.importSources.getBytes('src-fixed'))).toBe('TC 원본');
+  });
+
+  it('메모리 저장소도 IndexedDB add처럼 이미 있는 원본 key를 거부하고 아무것도 쓰지 않는다', async () => {
+    const store = createMemoryStateStore({ schemaVersion: 1, revision: 1, savedAt: 'x', data: createSeed() });
+    const data = createSeed();
+    await store.commit({ expectedRevision: 1, schemaVersion: 1, savedAt: 'a', data, artifacts: [{ id: 'src-1', bytes: new Blob(['원래']) }] });
+    await expect(store.commit({ expectedRevision: 2, schemaVersion: 1, savedAt: 'b', data, artifacts: [{ id: 'src-1', bytes: new Blob(['새것']) }] })).rejects.toMatchObject({
+      name: 'ConstraintError',
+    });
+    await expect(
+      store.commit({ expectedRevision: 2, schemaVersion: 1, savedAt: 'c', data, artifacts: [{ id: 'src-2', bytes: new Blob(['a']) }, { id: 'src-2', bytes: new Blob(['b']) }] }),
+    ).rejects.toMatchObject({ name: 'ConstraintError' });
+    expect(store.inspect().artifactIds).toEqual(['src-1']);
+    expect(await (await store.readArtifactBytes('src-1'))!.text()).toBe('원래');
+    expect(((await store.read()) as StoredAppState).revision).toBe(2);
+  });
+});
+
+describe('업무 상태 변경 순서', () => {
+  it('동시에 요청한 planned → done → planned는 순서대로 처리되어 최종 planned다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openTab(store);
+    const task = await repos.tasks.create({ title: '경쟁 확인' });
+    const [done, planned] = await Promise.all([repos.tasks.updateStatus(task.id, 'done'), repos.tasks.updateStatus(task.id, 'planned')]);
+    expect(done.status).toBe('done');
+    expect(planned.status).toBe('planned');
+    expect((await repos.tasks.get(task.id))?.status).toBe('planned');
+    expect((await storedState(store)).data.tasks.find((item) => item.id === task.id)?.status).toBe('planned');
+    expect(ready(repos).revision).toBe(4);
+  });
+
+  it('대기열에 들어간 시점의 최신 상태와 같으면 저장하지 않고 revision도 그대로다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openTab(store);
+    const task = await repos.tasks.create({ title: '변화 없음' });
+    const [same, done] = await Promise.all([repos.tasks.updateStatus(task.id, 'planned'), repos.tasks.updateStatus(task.id, 'done')]);
+    expect(same.status).toBe('planned');
+    expect(done.status).toBe('done');
+    expect(ready(repos).revision).toBe(3);
+    await repos.tasks.updateStatus(task.id, 'done');
+    expect(ready(repos).revision).toBe(3);
+    expect((await storedState(store)).revision).toBe(3);
+  });
+
+  it('없는 업무는 대기열 안에서 확인해 거부한다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    await expect(repos.tasks.updateStatus('task-missing', 'done')).rejects.toThrow('업무을(를) 찾을 수 없어요');
+  });
+});
+
+describe('저장소 밖 참조 격리', () => {
+  it('get · list로 받은 객체를 고쳐도 저장소 상태는 바뀌지 않는다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    const [first] = await repos.tasks.list();
+    const fetched = (await repos.tasks.get(first.id))!;
+    fetched.title = '외부 수정';
+    fetched.tags.push('외부 태그');
+    first.title = '목록에서 외부 수정';
+    const list = await repos.tasks.list();
+    list.pop();
+
+    const again = (await repos.tasks.get(first.id))!;
+    expect(again.title).not.toBe('외부 수정');
+    expect(again.title).not.toBe('목록에서 외부 수정');
+    expect(again.tags).not.toContain('외부 태그');
+    expect(await repos.tasks.list()).toHaveLength(list.length + 1);
+  });
+
+  it('입력으로 넘긴 배열 · 객체를 나중에 고쳐도 저장된 값은 바뀌지 않는다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    const tags = ['a'];
+    const task = await repos.tasks.create({ title: '입력 격리', tags });
+    tags.push('b');
+    expect((await repos.tasks.get(task.id))?.tags).toEqual(['a']);
+
+    const platforms: ('android' | 'ios')[] = ['android'];
+    const project = await repos.projects.create({ name: '입력 격리 프로젝트', platforms, testScopes: ['functional'] });
+    platforms.push('ios');
+    expect((await repos.projects.get(project.id))?.platforms).toEqual(['android']);
+
+    const examples = ['예시'];
+    const term = await repos.knowledge.create({ term: '격리', explanation: '설명', examples });
+    examples.push('추가');
+    expect((await repos.knowledge.get(term.id))?.examples).toEqual(['예시']);
+  });
+
+  it('변경이 돌려준 객체를 고쳐도 저장소 상태는 바뀌지 않는다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    const task = await repos.tasks.create({ title: '반환 격리', tags: ['x'] });
+    task.title = '반환 객체 수정';
+    task.tags.push('y');
+    const updated = await repos.tasks.updateStatus(task.id, 'done');
+    updated.status = 'planned';
+    expect(await repos.tasks.get(task.id)).toMatchObject({ title: '반환 격리', status: 'done', tags: ['x'] });
+
+    const [testCase] = await repos.testCases.listByProject(PROJECT_A);
+    const changed = await repos.testCases.updateStatus(testCase.id, 'reviewed');
+    changed.steps.push('외부 단계');
+    changed.depth[0] = '외부 분류';
+    const reread = (await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === testCase.id)!;
+    expect(reread.steps).toEqual(testCase.steps);
+    expect(reread.depth).toEqual(testCase.depth);
+  });
+
+  it('가져오기 입력 표를 나중에 고쳐도 snapshot · 열 매핑은 바뀌지 않는다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    const { table, mapping, apply } = await tcImport(repos, { bytes: new Blob(['원본']), format: 'csv' });
+    const session = await apply();
+    table.rows[0].cells[0] = '외부 수정';
+    table.headers[0] = '외부 헤더';
+    mapping[0] = null;
+    const [stored] = await repos.testAssetImports.listByProject(PROJECT_A);
+    expect(stored.sourceSnapshot).toEqual(session.sourceSnapshot);
+    expect(stored.sourceSnapshot?.headers[0]).toBe('TC ID');
+    expect(stored.columnMapping?.[0]).toBe('externalId');
+  });
+
+  it('저장에 실패해도, 그 전후에 외부에서 고친 객체가 메모리 상태로 새어 들어가지 않는다', async () => {
+    const { store, failNext } = faultyStore();
+    const repos = await openTab(store);
+    const task = await repos.tasks.create({ title: '실패 격리', tags: ['원래'] });
+    const outside = (await repos.tasks.get(task.id))!;
+    outside.title = '외부 수정';
+    outside.tags.push('외부');
+    const storedBefore = await storedState(store);
+
+    failNext('commit', 'write');
+    await expect(repos.tasks.updateStatus(task.id, 'done')).rejects.toBeInstanceOf(PersistenceError);
+    outside.status = 'done';
+
+    expect(await repos.tasks.get(task.id)).toMatchObject({ title: '실패 격리', status: 'planned', tags: ['원래'] });
+    expect(await storedState(store)).toEqual(storedBefore);
   });
 });

@@ -6,7 +6,8 @@ export type PersistenceErrorKind =
   | 'write_failed'
   | 'read_failed'
   | 'artifact_missing'
-  | 'artifact_corrupt';
+  | 'artifact_corrupt'
+  | 'artifact_duplicate';
 
 const messages: Record<PersistenceErrorKind, string> = {
   unavailable: '이 브라우저에서 로컬 저장소(IndexedDB)를 사용할 수 없어요. 개인 정보 보호 모드이거나 사이트 데이터 저장이 막혀 있을 수 있어요.',
@@ -16,6 +17,7 @@ const messages: Record<PersistenceErrorKind, string> = {
   read_failed: '로컬 저장소를 읽지 못했어요.',
   artifact_missing: '가져온 원본 파일을 로컬 저장소에서 찾을 수 없어요.',
   artifact_corrupt: '가져온 원본 파일이 기록과 달라요. 저장된 파일이 손상되었을 수 있어요.',
+  artifact_duplicate: '같은 ID의 원본 파일이 이미 있어 이 가져오기를 저장하지 않았어요. 기존 원본 파일은 그대로예요. 다시 시도해 주세요.',
 };
 
 export class PersistenceError extends Error {
@@ -32,5 +34,7 @@ export class PersistenceError extends Error {
 export function toPersistenceError(error: unknown, fallback: PersistenceErrorKind): PersistenceError {
   if (error instanceof PersistenceError) return error;
   if (error instanceof DOMException && error.name === 'QuotaExceededError') return new PersistenceError('quota');
+  // 원본 파일은 add로만 넣는다. 같은 key가 이미 있으면 ConstraintError로 transaction 전체가 취소된다.
+  if (error instanceof DOMException && error.name === 'ConstraintError') return new PersistenceError('artifact_duplicate');
   return new PersistenceError(fallback);
 }

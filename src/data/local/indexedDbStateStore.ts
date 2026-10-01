@@ -21,12 +21,20 @@ const requestResult = <T>(request: IDBRequest<T>) =>
     request.onerror = () => reject(request.error);
   });
 
-/** transaction이 끝까지 저장되면 resolve, 중단되거나 실패하면 reject. */
+/**
+ * transaction이 끝까지 저장되면 resolve, 취소되면 reject.
+ * 요청 단계 오류(ConstraintError 등)는 요청 → transaction으로 error 이벤트가 올라온 뒤 transaction이 취소된다.
+ * error 이벤트 시점의 transaction.error는 아직 null일 수 있어 첫 요청 오류를 기억했다가 취소 원인으로 쓴다.
+ * Promise는 complete 또는 abort 한 곳에서만 끝난다.
+ */
 const transactionDone = (transaction: IDBTransaction) =>
   new Promise<void>((resolve, reject) => {
+    let requestError: DOMException | null = null;
+    transaction.addEventListener('error', (event) => {
+      requestError ??= (event.target as IDBRequest | IDBTransaction | null)?.error ?? null;
+    });
     transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error);
-    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(requestError ?? transaction.error ?? new DOMException('IndexedDB transaction이 취소되었어요.', 'AbortError'));
   });
 
 export function openIndexedDbStateStore(factory: IDBFactory | undefined = globalThis.indexedDB): Promise<StateStore> {
@@ -113,7 +121,8 @@ function createStore(database: IDBDatabase): StateStore {
             return;
           }
           revision = stored.revision + 1;
-          for (const artifact of input.artifacts ?? []) artifacts.put(artifact.bytes, artifact.id);
+          // 원본 파일은 바뀌지 않는다. add는 같은 key가 있으면 ConstraintError로 transaction 전체를 취소한다(put처럼 덮어쓰지 않는다).
+          for (const artifact of input.artifacts ?? []) artifacts.add(artifact.bytes, artifact.id);
           const next: StoredAppState = { schemaVersion: input.schemaVersion, revision, savedAt: input.savedAt, data: input.data };
           states.put(next, STATE_KEY);
         };
