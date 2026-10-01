@@ -57,6 +57,14 @@ const copyImportInput = <T extends { source?: ImportSourceFileInput }>(input: T)
   return { ...copy(rest), ...(source && { source: { ...source } }) } as T;
 };
 
+/** 저장 상태의 값이 같은가. 필드는 모두 원시값이고, 값이 undefined인 필드(error)는 없는 것과 같게 본다. */
+const sameStatus = (a: PersistenceStatus, b: PersistenceStatus): boolean => {
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => Object.is(left[key], right[key]));
+};
+
 const emptyAppData = (): AppData => ({
   projects: [],
   tasks: [],
@@ -104,15 +112,18 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
   let db: AppData = preloaded ? structuredClone(preloaded.state.data) : emptyAppData();
   let store: StateStore | undefined = preloaded?.store;
   let revision = preloaded?.state.revision ?? 0;
-  let status: PersistenceStatus = preloaded
-    ? { state: 'ready', mode: preloaded.mode, revision, savedAt: preloaded.state.savedAt, stale: false }
-    : { state: 'loading' };
+  // 상태는 고정한 snapshot으로만 바꾼다. getStatus가 돌려준 객체를 밖에서 고쳐도 이 상태는 바뀌지 않는다.
+  let status: PersistenceStatus = Object.freeze<PersistenceStatus>(
+    preloaded ? { state: 'ready', mode: preloaded.mode, revision, savedAt: preloaded.state.savedAt, stale: false } : { state: 'loading' },
+  );
 
   const listeners = new Set<() => void>();
   const statusListeners = new Set<() => void>();
   const emit = () => listeners.forEach((listener) => listener());
+  /** 값이 실제로 바뀌었을 때만 새 snapshot으로 교체하고 알린다. 같으면 같은 객체를 그대로 둔다(불필요한 다시 그리기 방지). */
   const setStatus = (next: PersistenceStatus) => {
-    status = next;
+    if (sameStatus(status, next)) return;
+    status = Object.freeze(next);
     statusListeners.forEach((listener) => listener());
   };
   const updateReady = (patch: Partial<Extract<PersistenceStatus, { state: 'ready' }>>) => {

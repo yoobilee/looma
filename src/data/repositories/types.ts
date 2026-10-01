@@ -159,23 +159,27 @@ export interface ImportSourceArtifactRepository {
   getBytes(id: string): Promise<Uint8Array | undefined>;
 }
 
-/** 로컬 저장 상태. ready가 아니면 화면을 띄우지 않는다. */
+/** 로컬 저장 상태. ready가 아니면 화면을 띄우지 않는다. 읽기 전용 snapshot이며 바뀔 때마다 새 객체로 교체된다. */
 export type PersistenceStatus =
-  | { state: 'loading' }
+  | { readonly state: 'loading' }
   | {
-      state: 'ready';
+      readonly state: 'ready';
       /** local: 브라우저에 저장, memory: 사용자가 고른 저장하지 않는 모드 */
-      mode: 'local' | 'memory';
-      revision: number;
-      savedAt: string;
+      readonly mode: 'local' | 'memory';
+      readonly revision: number;
+      readonly savedAt: string;
       /** 다른 탭이 더 새 데이터를 저장했다. 다시 불러오기 전까지 저장하지 않는다. */
-      stale: boolean;
+      readonly stale: boolean;
       /** 마지막 저장 실패 안내 */
-      error?: string;
+      readonly error?: string;
     }
-  | { state: 'blocked'; reason: 'unavailable' | 'read_failed' | 'corrupt' | 'unsupported_version' | 'migration_failed'; message: string };
+  | { readonly state: 'blocked'; readonly reason: 'unavailable' | 'read_failed' | 'corrupt' | 'unsupported_version' | 'migration_failed'; readonly message: string };
 
 export interface PersistenceController {
+  /**
+   * 지금 상태의 snapshot. 고정(freeze)되어 있어 고쳐도 저장소 상태는 바뀌지 않는다.
+   * 상태가 그대로면 같은 객체를, 바뀌었을 때만 새 객체를 돌려준다(useSyncExternalStore 참조 안정성).
+   */
   getStatus(): PersistenceStatus;
   subscribe(listener: () => void): () => void;
   /** 저장된 데이터를 읽는다. 처음이면 예시 데이터를 만들어 저장한다. */
