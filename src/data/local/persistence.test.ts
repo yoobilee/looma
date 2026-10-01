@@ -901,3 +901,170 @@ describe('저장소 밖 참조 격리', () => {
     expect(await storedState(store)).toEqual(storedBefore);
   });
 });
+
+/* ---------- 저장 상태 snapshot ---------- */
+
+/** 상태 snapshot을 밖에서 고쳐 본다. strict mode에서 던지는지와 무관하게, 고쳐졌는지만 돌려준다. */
+function tryMutate(status: PersistenceStatus): boolean {
+  const target = status as unknown as Record<string, unknown>;
+  const results = [Reflect.set(target, 'stale', true), Reflect.set(target, 'revision', 999), Reflect.set(target, 'state', 'loading'), Reflect.deleteProperty(target, 'state')];
+  return results.some(Boolean);
+}
+
+/** 상태 알림 횟수를 센다. */
+function countNotifications(repos: Repositories) {
+  const listener = vi.fn();
+  repos.persistence.subscribe(listener);
+  return listener;
+}
+
+describe('저장 상태 snapshot', () => {
+  it('getStatus로 받은 상태를 고쳐도 내부 상태는 바뀌지 않고 알림도 없다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    const listener = countNotifications(repos);
+    const status = ready(repos);
+    const before = { ...status };
+
+    expect(Object.isFrozen(status)).toBe(true);
+    expect(tryMutate(status)).toBe(false);
+    // 일반 대입도 내부 상태를 바꾸지 못한다(strict mode에서는 TypeError).
+    try {
+      (status as { stale: boolean }).stale = true;
+    } catch {
+      // 고정된 객체라 던질 수 있다. 던지는지보다 상태가 그대로인지가 중요하다.
+    }
+
+    expect(repos.persistence.getStatus()).toBe(status);
+    expect(ready(repos)).toEqual(before);
+    expect(ready(repos).stale).toBe(false);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('고치려 한 뒤에도 정상 저장은 conflict 없이 저장되고 revision이 오른다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openTab(store);
+    tryMutate(repos.persistence.getStatus());
+
+    const task = await repos.tasks.create({ title: '변이 시도 뒤 저장' });
+    expect(ready(repos)).toMatchObject({ state: 'ready', stale: false, revision: 2 });
+    expect(ready(repos).error).toBeUndefined();
+    expect((await storedState(store)).data.tasks.some((item) => item.id === task.id)).toBe(true);
+  });
+
+  it('상태가 그대로면 같은 객체를, 바뀌면 새 객체를 돌려주고 이전 snapshot은 그대로다', async () => {
+    const repos = await openTab(createMemoryStateStore());
+    const first = repos.persistence.getStatus();
+    expect(repos.persistence.getStatus()).toBe(first);
+
+    // 저장하지 않는 변경 · 읽기 · 안내가 없을 때 안내 닫기는 상태를 바꾸지 않는다.
+    const [task] = await repos.tasks.list();
+    await repos.tasks.updateStatus(task.id, task.status);
+    repos.persistence.dismissError();
+    expect(repos.persistence.getStatus()).toBe(first);
+
+    await repos.tasks.create({ title: '상태 바꾸기' });
+    const second = repos.persistence.getStatus();
+    expect(second).not.toBe(first);
+    expect(Object.isFrozen(second)).toBe(true);
+    expect(first).toMatchObject({ revision: 1 });
+    expect(second).toMatchObject({ revision: 2 });
+    expect(repos.persistence.getStatus()).toBe(second);
+  });
+
+  it('구독자는 상태가 실제로 바뀔 때만 알림을 받는다', async () => {
+    const { store, failNext, heal } = faultyStore();
+    const hub = createMemoryChannelHub();
+    const repos = await openTab(store, { channel: hub.connect() });
+    const other = await openTab(store, { channel: hub.connect() });
+    const listener = countNotifications(repos);
+
+    await repos.tasks.create({ title: '저장' });
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    repos.persistence.dismissError();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    failNext('commit', 'write');
+    await expect(repos.tasks.create({ title: '실패' })).rejects.toBeInstanceOf(PersistenceError);
+    heal();
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(ready(repos).error).toContain('저장하지 못했어요');
+
+    repos.persistence.dismissError();
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(ready(repos).error).toBeUndefined();
+
+    // 다른 탭이 두 번 저장하면 첫 알림만 stale로 바꾸고, 이미 stale이면 다시 알리지 않는다.
+    await other.persistence.reloadLatest();
+    await other.tasks.create({ title: '다른 탭 1' });
+    expect(listener).toHaveBeenCalledTimes(4);
+    const stale = repos.persistence.getStatus();
+    await other.tasks.create({ title: '다른 탭 2' });
+    expect(listener).toHaveBeenCalledTimes(4);
+    expect(repos.persistence.getStatus()).toBe(stale);
+  });
+
+  it('stale · conflict 동작은 그대로이고 그때의 snapshot도 고정되어 있다', async () => {
+    const store = createMemoryStateStore();
+    const tabA = await openTab(store);
+    const tabB = await openTab(store);
+    await tabA.tasks.create({ title: 'A 탭 업무' });
+    await expect(tabB.tasks.create({ title: 'B 탭 업무' })).rejects.toMatchObject({ kind: 'conflict' });
+
+    const stale = ready(tabB);
+    expect(stale).toMatchObject({ stale: true, revision: 1 });
+    expect(Object.isFrozen(stale)).toBe(true);
+    // 밖에서 stale을 풀어도 저장을 우회하지 못한다.
+    expect(Reflect.set(stale, 'stale', false)).toBe(false);
+    await expect(tabB.tasks.create({ title: 'B 탭 두 번째' })).rejects.toMatchObject({ kind: 'conflict' });
+
+    await tabB.persistence.reloadLatest();
+    const reloaded = ready(tabB);
+    expect(reloaded).not.toBe(stale);
+    expect(reloaded).toMatchObject({ stale: false, revision: 2 });
+    expect(stale.stale).toBe(true);
+    await tabB.tasks.create({ title: 'B 탭 업무' });
+    expect((await storedState(store)).revision).toBe(3);
+  });
+
+  it('불러오는 중 · 막힘 · 초기화 · 저장하지 않는 모드의 상태도 고정된 snapshot이다', async () => {
+    const repos = createLocalRepositories({ openStore: async () => Promise.reject(new PersistenceError('unavailable')) });
+    const loading = repos.persistence.getStatus();
+    expect(loading).toEqual({ state: 'loading' });
+    expect(Object.isFrozen(loading)).toBe(true);
+    expect(tryMutate(loading)).toBe(false);
+
+    await repos.persistence.load();
+    const blocked = repos.persistence.getStatus();
+    expect(blocked).toMatchObject({ state: 'blocked', reason: 'unavailable' });
+    expect(Object.isFrozen(blocked)).toBe(true);
+    expect(tryMutate(blocked)).toBe(false);
+    expect(repos.persistence.getStatus()).toBe(blocked);
+    await expect(repos.tasks.create({ title: 'x' })).rejects.toBeInstanceOf(PersistenceError);
+
+    await repos.persistence.continueWithoutSaving();
+    const memory = repos.persistence.getStatus();
+    expect(memory).toMatchObject({ state: 'ready', mode: 'memory' });
+    expect(Object.isFrozen(memory)).toBe(true);
+
+    const local = await openTab(createMemoryStateStore());
+    await local.tasks.create({ title: '초기화 전' });
+    const beforeReset = local.persistence.getStatus();
+    await local.persistence.resetToSeed();
+    const afterReset = local.persistence.getStatus();
+    expect(afterReset).not.toBe(beforeReset);
+    expect(afterReset).toMatchObject({ state: 'ready', stale: false, revision: 3 });
+    expect(Object.isFrozen(afterReset)).toBe(true);
+    expect(tryMutate(afterReset)).toBe(false);
+  });
+
+  it('미리 읽어 둔 상태로 시작해도 고정된 snapshot이다', () => {
+    const store = createMemoryStateStore();
+    const state = { schemaVersion: CURRENT_SCHEMA_VERSION, revision: 5, savedAt: '2026-01-01T00:00:00.000Z', data: createSeed() };
+    const repos = createLocalRepositories({ openStore: async () => store, preloaded: { store, state, mode: 'memory' } });
+    const status = repos.persistence.getStatus();
+    expect(status).toEqual({ state: 'ready', mode: 'memory', revision: 5, savedAt: state.savedAt, stale: false });
+    expect(Object.isFrozen(status)).toBe(true);
+    expect(repos.persistence.getStatus()).toBe(status);
+  });
+});
