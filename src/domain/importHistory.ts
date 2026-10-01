@@ -7,6 +7,8 @@ interface ImportHistoryBase {
   projectId: string;
   fileName: string;
   importedAt: string;
+  /** 보관한 원본 파일. 원본을 보관하지 않은 이전 가져오기에는 없다. */
+  artifactId?: string;
 }
 
 export interface AssetImportHistoryItem extends ImportHistoryBase {
@@ -40,6 +42,7 @@ export function toAssetImportHistoryItem(session: TestAssetImportSession): Asset
     projectId: session.projectId,
     fileName: session.fileName,
     importedAt: session.importedAt,
+    ...(session.artifactId && { artifactId: session.artifactId }),
     totalRows: session.totalRows,
     created: session.created,
     updated: session.updated,
@@ -55,6 +58,7 @@ export function toResultImportHistoryItem(resultImport: TestResultImport, result
     projectId: resultImport.projectId,
     fileName: resultImport.fileRef,
     importedAt: resultImport.importedAt,
+    ...(resultImport.artifactId && { artifactId: resultImport.artifactId }),
     round: resultImport.round,
     executionType: resultImport.executionType ?? 'full',
     executedFrom: resultImport.executedFrom,

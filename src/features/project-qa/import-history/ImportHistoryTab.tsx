@@ -11,12 +11,14 @@ import {
 } from '@/domain/importHistory';
 import { resultImportSummaryText } from '@/domain/testResultImport';
 import { executionTypeLabel, platformLabel } from '@/domain/labels';
+import type { ImportSourceFormat } from '@/domain/types';
 import { formatDateTime } from '@/lib/date';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Tag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
+import { SourceExportAction } from '../source-export/SourceExportAction';
 import styles from './ImportHistoryTab.module.css';
 
 function assetSummary(item: AssetImportHistoryItem): string {
@@ -29,7 +31,7 @@ function resultMeta(item: ResultImportHistoryItem): string[] {
   return [period, item.environment, item.platform && platformLabel[item.platform]].filter((value): value is string => !!value);
 }
 
-function HistoryRow({ item, base }: { item: ImportHistoryItem; base: string }) {
+function HistoryRow({ item, base, sourceFormat }: { item: ImportHistoryItem; base: string; sourceFormat?: ImportSourceFormat }) {
   const isResult = item.type === 'result';
   const meta = isResult ? resultMeta(item) : [`총 ${item.totalRows}행`];
   return (
@@ -49,6 +51,7 @@ function HistoryRow({ item, base }: { item: ImportHistoryItem; base: string }) {
       <Link className={styles.link} to={isResult ? `${base}/results?import=${encodeURIComponent(item.id)}` : `${base}/test-design`}>
         {isResult ? '수행 결과 보기' : '테스트 설계 보기'}
       </Link>
+      <SourceExportAction kind={item.type} projectId={item.projectId} recordId={item.id} sourceFormat={sourceFormat} />
     </li>
   );
 }
@@ -66,7 +69,12 @@ export function ImportHistoryTab() {
     async (repos) => {
       const [sessions, resultImports] = await Promise.all([repos.testAssetImports.listByProject(project.id), repos.testResults.listImports(project.id)]);
       const resultsByImport = Object.fromEntries(await Promise.all(resultImports.map(async (item) => [item.id, await repos.testResults.listResults(item.id)] as const)));
-      return buildImportHistory(sessions, resultImports, resultsByImport);
+      const items = buildImportHistory(sessions, resultImports, resultsByImport);
+      // 원본 형식 내보내기를 쓸 수 있는지 알기 위해 보관한 원본의 형식만 읽는다(bytes는 읽지 않는다).
+      const artifactIds = items.flatMap((item) => (item.artifactId ? [item.artifactId] : []));
+      const artifacts = await Promise.all(artifactIds.map((id) => repos.importSources.get(id)));
+      const formatByArtifact = Object.fromEntries(artifacts.flatMap((artifact) => (artifact ? [[artifact.id, artifact.format] as const] : [])));
+      return { items, formatByArtifact };
     },
     [project.id],
   );
@@ -74,7 +82,7 @@ export function ImportHistoryTab() {
   if (data.status === 'loading') return <LoadingState />;
   if (data.status === 'error') return <StateMessage tone="error" title="가져오기 이력을 불러오지 못했어요." />;
 
-  const all = data.data;
+  const { items: all, formatByArtifact } = data.data;
   const visible = filterImportHistory(all, filter);
 
   if (all.length === 0) {
@@ -93,6 +101,7 @@ export function ImportHistoryTab() {
   return (
     <section className={styles.page} aria-labelledby="import-history-title">
       <SectionHeader id="import-history-title" title="가져오기 이력" meta={`${visible.length}건`} />
+      <p className={styles.intro}>원본 형식 내보내기는 가져온 원본 XLSX의 기존 행에만 지금 값을 반영해요. 신규 TC는 포함되지 않고, 원본 XLSX가 보관된 가져오기에서만 쓸 수 있어요.</p>
       <FilterTabs
         label="가져오기 종류"
         value={filter}
@@ -108,7 +117,7 @@ export function ImportHistoryTab() {
       ) : (
         <ul className={styles.list}>
           {visible.map((item) => (
-            <HistoryRow key={`${item.type}-${item.id}`} item={item} base={base} />
+            <HistoryRow key={`${item.type}-${item.id}`} item={item} base={base} sourceFormat={item.artifactId ? formatByArtifact[item.artifactId] : undefined} />
           ))}
         </ul>
       )}
