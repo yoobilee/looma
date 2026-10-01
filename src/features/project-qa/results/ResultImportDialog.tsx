@@ -109,7 +109,7 @@ export function ResultImportDialog({ open, onClose, projectId, platforms, testCa
   const [valueDecisions, setValueDecisions] = useState<Record<string, ResultValueDecision>>({});
   const [filter, setFilter] = useState<RowFilter>('all');
   // 파일이나 시트가 바뀌면 이전 파일의 컬럼 매핑과 판단은 버리고 새 표 기준으로 다시 시작한다.
-  const { fileName, table, notes, fileError, chooseFile, chooseSheet, sheetNames, sheetName, formatLabel } = useImportFile((nextTable) => {
+  const { fileName, table, notes, fileError, chooseFile, chooseSheet, sheetNames, sheetName, formatLabel, sourceFile } = useImportFile((nextTable) => {
     setMapping(nextTable ? suggestResultColumnMapping(nextTable.headers) : []);
     setRowDecisions({});
     setValueDecisions({});
@@ -159,12 +159,13 @@ export function ResultImportDialog({ open, onClose, projectId, platforms, testCa
   };
 
   const apply = async () => {
-    if (!table) return;
+    // 화면에서 가져오면 원본 파일을 항상 함께 저장한다.
+    if (!table || !sourceFile) return;
     setBusy(true);
     setApplyError('');
     try {
       setSaved(
-        await repositories.testResults.importResults({ projectId, fileName, table, mapping, cycle: cycleInput, rowDecisions: decisions, valueDecisions }),
+        await repositories.testResults.importResults({ projectId, fileName, table, mapping, cycle: cycleInput, rowDecisions: decisions, valueDecisions, source: sourceFile }),
       );
       setStep('done');
     } catch (error) {

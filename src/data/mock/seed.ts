@@ -12,6 +12,7 @@ import type {
   TCTemplate,
   TestCase,
   TestCondition,
+  ImportSourceArtifact,
   TestAssetImportSession,
   TestResult,
   TestResultImport,
@@ -19,7 +20,8 @@ import type {
 } from '@/domain/types';
 
 // 화면 확인용 예시 데이터. 실제 고객사·서비스 정보가 아니다.
-// 날짜는 앱을 연 시점 기준으로 계산해 "오늘" 화면이 항상 의미 있게 보이도록 한다.
+// 날짜는 처음 만들 때의 시각 기준으로 계산한다. 브라우저에 저장된 뒤에는 다시 계산하지 않고 일반 사용자 데이터로 다룬다.
+// (로컬 데이터 초기화를 하면 그때 시각 기준으로 새로 만든다.)
 
 function at(dayOffset: number, hour: number, minute = 0): string {
   const date = new Date();
@@ -940,6 +942,7 @@ export function createSeed() {
     testConditions,
     testCases,
     testAssetImports: [] as TestAssetImportSession[],
+    importSourceArtifacts: [] as ImportSourceArtifact[],
     changeAnalyses,
     resultImports,
     results,

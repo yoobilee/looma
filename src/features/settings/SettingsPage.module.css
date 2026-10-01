@@ -106,3 +106,19 @@
     gap: 44px;
   }
 }
+
+/* 로컬 데이터: 설명과 초기화 */
+.localData {
+  display: grid;
+  gap: 10px;
+  max-width: 640px;
+  font: var(--text-body);
+}
+
+.localData p {
+  margin: 0;
+}
+
+.localData .note {
+  margin-top: 0;
+}

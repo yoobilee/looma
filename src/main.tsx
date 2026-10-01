@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router-dom';
 import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import './styles/tokens.css';
 import './styles/base.css';
+import { PersistenceGate } from './app/PersistenceGate';
 import { ThemeProvider } from './app/ThemeProvider';
 import { router } from './app/router';
 
@@ -13,7 +14,9 @@ if (!root) throw new Error('#root 요소가 없어요.');
 createRoot(root).render(
   <StrictMode>
     <ThemeProvider>
-      <RouterProvider router={router} />
+      <PersistenceGate>
+        <RouterProvider router={router} />
+      </PersistenceGate>
     </ThemeProvider>
   </StrictMode>,
 );

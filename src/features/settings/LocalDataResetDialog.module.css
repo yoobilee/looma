@@ -1,0 +1,20 @@
+.body {
+  display: grid;
+  gap: 10px;
+  font: var(--text-body);
+}
+
+.body p {
+  margin: 0;
+}
+
+.warning {
+  font-weight: 700;
+  color: var(--color-coral-strong);
+}
+
+.error {
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--status-fail);
+}

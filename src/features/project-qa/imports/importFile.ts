@@ -1,3 +1,4 @@
+import { importSourceMimeType } from '@/domain/importSource';
 import { toImportTable, type ImportTable } from '@/domain/testAssetImport';
 import { decodeText, parseCsv } from '@/lib/csv';
 import { ImportFileError, openXlsxWorkbook } from './xlsxSheet';
@@ -17,6 +18,8 @@ export type ImportTableResult = { ok: true; table: ImportTable; notes: string[] 
 /** 파일 하나. 시트가 둘 이상이면 호출한 쪽이 시트를 고른 뒤 readTable을 부른다. */
 export interface ImportFileSource {
   format: 'csv' | 'xlsx';
+  /** 표를 읽은 바로 그 원본 bytes. 원본 파일로 저장할 때 쓴다(다시 쓴 파일이 아니다). */
+  bytes: Blob;
   /** 고를 수 있는 시트 이름. CSV는 비어 있다. */
   sheetNames: string[];
   readTable(sheetName?: string): ImportTableResult;
@@ -50,7 +53,10 @@ export async function readImportFile(file: File): Promise<ImportFileResult> {
 
     if (extension === 'csv') {
       const records = parseCsv(decodeText(buffer));
-      return { ok: true, source: { format: 'csv', sheetNames: [], readTable: () => tableResult(records, '파일에 내용이 없어요.') } };
+      return {
+        ok: true,
+        source: { format: 'csv', bytes: new Blob([buffer], { type: importSourceMimeType.csv }), sheetNames: [], readTable: () => tableResult(records, '파일에 내용이 없어요.') },
+      };
     }
 
     const workbook = await openXlsxWorkbook(buffer);
@@ -58,6 +64,7 @@ export async function readImportFile(file: File): Promise<ImportFileResult> {
       ok: true,
       source: {
         format: 'xlsx',
+        bytes: new Blob([buffer], { type: importSourceMimeType.xlsx }),
         sheetNames: workbook.sheetNames,
         readTable(sheetName) {
           if (!sheetName || !workbook.sheetNames.includes(sheetName)) return { ok: false, message: '가져올 시트를 선택해 주세요.' };

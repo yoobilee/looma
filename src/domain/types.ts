@@ -1,6 +1,9 @@
 // LOOMA_IMPLEMENTATION_SPEC.md 5장 데이터 모델을 TypeScript 타입으로 옮긴 것.
 // 날짜는 모두 ISO 8601 문자열로 다룬다.
 
+import type { ColumnMapping } from './testAssetImport';
+import type { ResultColumnMapping } from './testResultImport';
+
 export type ThemePreference = 'light' | 'dark';
 
 export interface User {
@@ -182,6 +185,34 @@ export interface TestCase {
   updatedAt: string;
 }
 
+/*
+ * 가져오기 원본 파일. 사용자가 올린 파일 bytes는 이 메타데이터와 따로 저장하고, 도메인 객체에는 id만 둔다.
+ * 원본은 가져온 뒤 바꾸지 않는다(SheetJS로 다시 쓴 파일이 아니라 올린 그대로다).
+ */
+export type ImportSourceFormat = 'csv' | 'xlsx';
+
+export interface ImportSourceArtifact {
+  id: string;
+  projectId: string;
+  fileName: string;
+  format: ImportSourceFormat;
+  mimeType: string;
+  /** 원본 bytes 크기. 읽을 때 저장된 bytes와 맞는지 확인한다. */
+  size: number;
+  /** XLSX에서 가져온 시트 */
+  selectedSheetName?: string;
+  createdAt: string;
+}
+
+/** 가져온 표의 layout. 파일을 다시 읽지 않아도 원래 헤더 · 열 순서 · 행 번호 · 매핑하지 않은 열 값을 알 수 있다. */
+export interface ImportSourceSnapshot {
+  format: ImportSourceFormat;
+  fileName: string;
+  sheetName?: string;
+  headers: string[];
+  rows: { rowNumber: number; cells: string[] }[];
+}
+
 /* TC 자산 가져오기: 고객사가 쓰던 TC 정의를 기준 TC로 가져온 작업 단위. 수행 결과 업로드와 별개다. */
 export interface TestAssetImportSession {
   id: string;
@@ -195,6 +226,11 @@ export interface TestAssetImportSession {
   /** 기존 TC와 내용이 같아 바꾸지 않은 행 */
   unchanged: number;
   excluded: number;
+  /** 원본 파일. 원본을 보관하지 않은 이전 가져오기(예시 데이터 등)에는 없다. 셋은 항상 함께 있거나 함께 없다. */
+  artifactId?: string;
+  sourceSnapshot?: ImportSourceSnapshot;
+  /** 가져올 때 쓴 파일 열 → TC 필드 연결 */
+  columnMapping?: ColumnMapping;
 }
 
 /* 수행 결과 */
@@ -223,6 +259,11 @@ export interface TestResultImport {
   /** 파일에 플랫폼 정보가 없을 때 이 차수의 결과에 붙인 플랫폼 */
   platform?: Platform;
   note?: string;
+  /** 원본 파일. 원본을 보관하지 않은 이전 가져오기(예시 데이터 등)에는 없다. 셋은 항상 함께 있거나 함께 없다. */
+  artifactId?: string;
+  sourceSnapshot?: ImportSourceSnapshot;
+  /** 가져올 때 쓴 파일 열 → 결과 필드 연결. 결과 원문 → 표준 결과 매핑(mapping)과 다르다. */
+  resultColumnMapping?: ResultColumnMapping;
 }
 
 export interface TestResult {
