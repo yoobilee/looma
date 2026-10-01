@@ -43,7 +43,9 @@ import { Dialog } from '@/components/ui/Dialog';
 import { SelectField, TextAreaField, TextField } from '@/components/ui/Field';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { ResultTag, Tag, type TagTone } from '@/components/ui/Tag';
-import { readTestAssetFile } from '../test-design/testAssetFile';
+import { importFileAccept } from '../imports/importFile';
+import { ImportSheetSelect } from '../imports/ImportSheetSelect';
+import { useImportFile } from '../imports/useImportFile';
 import styles from './ResultImportDialog.module.css';
 
 type Step = 'file' | 'mapping' | 'cycle' | 'preview' | 'confirm' | 'done';
@@ -100,15 +102,19 @@ interface ResultImportDialogProps {
  */
 export function ResultImportDialog({ open, onClose, projectId, platforms, testCases, imports, templateMappings }: ResultImportDialogProps) {
   const [step, setStep] = useState<Step>('file');
-  const [fileName, setFileName] = useState('');
-  const [table, setTable] = useState<ImportTable>();
-  const [fileError, setFileError] = useState('');
   const [mapping, setMapping] = useState<ResultColumnMapping>([]);
   const [cycle, setCycle] = useState<ResultCycleInput>(() => ({ round: suggestNextRound(imports), executionType: 'full', executedFrom: today() }));
   const [roundText, setRoundText] = useState(() => String(suggestNextRound(imports)));
   const [rowDecisions, setRowDecisions] = useState<Record<number, ResultRowDecision>>({});
   const [valueDecisions, setValueDecisions] = useState<Record<string, ResultValueDecision>>({});
   const [filter, setFilter] = useState<RowFilter>('all');
+  // 파일이나 시트가 바뀌면 이전 파일의 컬럼 매핑과 판단은 버리고 새 표 기준으로 다시 시작한다.
+  const { fileName, table, notes, fileError, chooseFile, chooseSheet, sheetNames, sheetName, formatLabel } = useImportFile((nextTable) => {
+    setMapping(nextTable ? suggestResultColumnMapping(nextTable.headers) : []);
+    setRowDecisions({});
+    setValueDecisions({});
+    setFilter('all');
+  });
   const [busy, setBusy] = useState(false);
   const [applyError, setApplyError] = useState('');
   const [saved, setSaved] = useState<TestResultImport>();
@@ -144,20 +150,6 @@ export function ResultImportDialog({ open, onClose, projectId, platforms, testCa
       plan = { problem: error instanceof Error ? error.message.replace('수행 결과를 가져올 수 없어요. ', '') : '가져올 수 없어요.' };
     }
   }
-
-  const chooseFile = async (file: File | undefined) => {
-    setTable(undefined);
-    setFileError('');
-    setFileName(file?.name ?? '');
-    if (!file) return;
-    const result = await readTestAssetFile(file);
-    if (!result.ok) {
-      setFileError(result.message);
-      return;
-    }
-    setTable(result.table);
-    setMapping(suggestResultColumnMapping(result.table.headers));
-  };
 
   const goToPreview = () => {
     setRowDecisions({});
@@ -278,10 +270,11 @@ export function ResultImportDialog({ open, onClose, projectId, platforms, testCa
             <TextField
               label="수행 결과 파일"
               type="file"
-              accept=".csv,text/csv"
+              accept={importFileAccept}
               onChange={(event) => void chooseFile(event.target.files?.[0])}
-              hint='CSV만 지원해요. XLSX는 Excel에서 "CSV UTF-8"로 저장해 올려 주세요. TC 정의 파일은 테스트 설계의 TC 가져오기에서 올려요.'
+              hint="CSV와 XLSX 파일을 지원해요. TC 정의 파일은 테스트 설계의 TC 가져오기에서 올려요."
             />
+            <ImportSheetSelect sheetNames={sheetNames} value={sheetName} onChange={chooseSheet} />
             {fileError && (
               <p className={styles.error} role="alert">
                 {fileError}
@@ -293,13 +286,18 @@ export function ResultImportDialog({ open, onClose, projectId, platforms, testCa
                   {fileName}
                 </h3>
                 <p className={styles.caption}>
-                  CSV · 시트 1개 · 컬럼 {table.headers.length}개 · 데이터 행 {table.rows.length}개(빈 행 포함)
+                  {formatLabel} · 컬럼 {table.headers.length}개 · 데이터 행 {table.rows.length}개(빈 행 포함)
                 </p>
                 <p className={styles.columns}>
                   {table.headers.map((header, index) => (
                     <span key={index}>{header}</span>
                   ))}
                 </p>
+                {notes.map((note) => (
+                  <p key={note} className={styles.caption}>
+                    {note}
+                  </p>
+                ))}
               </section>
             )}
           </>

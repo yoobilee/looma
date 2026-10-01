@@ -35,7 +35,9 @@ import { Dialog } from '@/components/ui/Dialog';
 import { SelectField, TextField } from '@/components/ui/Field';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { Tag, type TagTone } from '@/components/ui/Tag';
-import { readTestAssetFile } from './testAssetFile';
+import { importFileAccept } from '../imports/importFile';
+import { ImportSheetSelect } from '../imports/ImportSheetSelect';
+import { useImportFile } from '../imports/useImportFile';
 import styles from './TestAssetImportDialog.module.css';
 
 type Step = 'file' | 'mapping' | 'preview' | 'confirm' | 'done';
@@ -85,12 +87,15 @@ interface TestAssetImportDialogProps {
  */
 export function TestAssetImportDialog({ open, onClose, projectId, testCases }: TestAssetImportDialogProps) {
   const [step, setStep] = useState<Step>('file');
-  const [fileName, setFileName] = useState('');
-  const [table, setTable] = useState<ImportTable>();
-  const [fileError, setFileError] = useState('');
   const [mapping, setMapping] = useState<ColumnMapping>([]);
   const [decisions, setDecisions] = useState<Record<number, TestAssetImportDecision>>({});
   const [filter, setFilter] = useState<RowFilter>('all');
+  // 파일이나 시트가 바뀌면 이전 파일의 컬럼 매핑과 판단은 버리고 새 표 기준으로 다시 시작한다.
+  const { fileName, table, notes, fileError, chooseFile, chooseSheet, sheetNames, sheetName, formatLabel } = useImportFile((nextTable) => {
+    setMapping(nextTable ? suggestColumnMapping(nextTable.headers) : []);
+    setDecisions({});
+    setFilter('all');
+  });
   const [busy, setBusy] = useState(false);
   const [applyError, setApplyError] = useState('');
   const [session, setSession] = useState<TestAssetImportSession>();
@@ -116,20 +121,6 @@ export function TestAssetImportDialog({ open, onClose, projectId, testCases }: T
       plan = { problem: error instanceof Error ? error.message.replace('TC를 가져올 수 없어요. ', '') : '가져올 수 없어요.' };
     }
   }
-
-  const chooseFile = async (file: File | undefined) => {
-    setTable(undefined);
-    setFileError('');
-    setFileName(file?.name ?? '');
-    if (!file) return;
-    const result = await readTestAssetFile(file);
-    if (!result.ok) {
-      setFileError(result.message);
-      return;
-    }
-    setTable(result.table);
-    setMapping(suggestColumnMapping(result.table.headers));
-  };
 
   const goToPreview = () => {
     setDecisions({});
@@ -234,10 +225,11 @@ export function TestAssetImportDialog({ open, onClose, projectId, testCases }: T
             <TextField
               label="기존 TC 파일"
               type="file"
-              accept=".csv,text/csv"
+              accept={importFileAccept}
               onChange={(event) => void chooseFile(event.target.files?.[0])}
-              hint='CSV만 지원해요. XLSX는 Excel에서 "CSV UTF-8"로 저장해 올려 주세요. 수행 결과 파일은 수행 결과 탭에서 올려요.'
+              hint="CSV와 XLSX 파일을 지원해요. 수행 결과 파일은 수행 결과 탭에서 올려요."
             />
+            <ImportSheetSelect sheetNames={sheetNames} value={sheetName} onChange={chooseSheet} />
             {fileError && (
               <p className={styles.error} role="alert">
                 {fileError}
@@ -249,13 +241,18 @@ export function TestAssetImportDialog({ open, onClose, projectId, testCases }: T
                   {fileName}
                 </h3>
                 <p className={styles.caption}>
-                  CSV · 시트 1개 · 컬럼 {table.headers.length}개 · 데이터 행 {table.rows.length}개(빈 행 포함)
+                  {formatLabel} · 컬럼 {table.headers.length}개 · 데이터 행 {table.rows.length}개(빈 행 포함)
                 </p>
                 <p className={styles.columns}>
                   {table.headers.map((header, index) => (
                     <span key={index}>{header}</span>
                   ))}
                 </p>
+                {notes.map((note) => (
+                  <p key={note} className={styles.caption}>
+                    {note}
+                  </p>
+                ))}
               </section>
             )}
           </>
