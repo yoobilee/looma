@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { ButtonLink } from '@/components/ui/Button';
+import { ProjectSectionMenu } from './ProjectSectionMenu';
 import { DeliverableCreateDialog } from './deliverables/DeliverableCreateDialog';
 import type { ProjectOutletContext } from './projectContext';
 import styles from './ProjectLayout.module.css';
@@ -96,6 +97,19 @@ export function ProjectLayout() {
           </Button>
         </section>
       )}
+
+      {/* 640px 이하에서는 단계 탭 대신 현재 섹션 하나만 보이는 메뉴를 쓴다. */}
+      <div className={styles.compactNav}>
+        <ProjectSectionMenu
+          currentPath={currentTab.path}
+          items={tabs.map((tab, index) => ({
+            path: tab.path,
+            label: tab.label,
+            to: tab.path ? `${base}/${tab.path}` : base,
+            group: index < 5 ? '테스트 흐름' : '보조',
+          }))}
+        />
+      </div>
 
       <nav className={styles.tabs} aria-label="프로젝트 작업 단계">
         {tabs.map((tab, index) => (
