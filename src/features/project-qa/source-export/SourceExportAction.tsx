@@ -4,7 +4,8 @@ import { importSourceMimeType } from '@/domain/importSource';
 import type { ImportSourceFormat } from '@/domain/types';
 import { downloadFile } from '@/lib/downloadFile';
 import { Button } from '@/components/ui/Button';
-import { exportResultSource, exportTestAssetSource, type SourceExportOutcome } from './exportImportSource';
+import { exportResultSource, exportTestAssetSource } from './exportImportSource';
+import { runSourceExport, type SourceExportState } from './runSourceExport';
 import styles from './SourceExportAction.module.css';
 
 interface SourceExportActionProps {
@@ -15,13 +16,11 @@ interface SourceExportActionProps {
   sourceFormat?: ImportSourceFormat;
 }
 
-type State = { status: 'idle' } | { status: 'busy' } | { status: 'done'; message: string; notices: string[] } | { status: 'failed'; problems: string[] };
-
 const MAX_PROBLEMS = 5;
 
 /** 가져온 원본 XLSX 형식을 유지해 기존 행의 값만 반영한 파일을 내려받는다. */
 export function SourceExportAction({ kind, projectId, recordId, sourceFormat }: SourceExportActionProps) {
-  const [state, setState] = useState<State>({ status: 'idle' });
+  const [state, setState] = useState<SourceExportState>({ status: 'idle' });
 
   if (sourceFormat !== 'xlsx') {
     return (
@@ -33,24 +32,12 @@ export function SourceExportAction({ kind, projectId, recordId, sourceFormat }: 
 
   const run = async () => {
     setState({ status: 'busy' });
-    let outcome: SourceExportOutcome;
-    try {
-      outcome = kind === 'asset' ? await exportTestAssetSource(projectId, recordId) : await exportResultSource(projectId, recordId);
-    } catch {
-      setState({ status: 'failed', problems: ['내보내기 중 알 수 없는 오류가 났어요. 원본 파일은 바뀌지 않았어요.'] });
-      return;
-    }
-    if (!outcome.ok) {
-      setState({ status: 'failed', problems: outcome.problems });
-      return;
-    }
-    downloadFile(outcome.bytes as Uint8Array<ArrayBuffer>, outcome.fileName, importSourceMimeType.xlsx);
-    const changed = outcome.changedCells.length;
-    setState({
-      status: 'done',
-      message: changed > 0 ? `${outcome.fileName} · 셀 ${changed}개에 현재 값을 반영했어요.` : `${outcome.fileName} · 바뀐 값이 없어 원본과 같은 파일이에요.`,
-      notices: outcome.notices,
-    });
+    setState(
+      await runSourceExport(
+        () => (kind === 'asset' ? exportTestAssetSource(projectId, recordId) : exportResultSource(projectId, recordId)),
+        (bytes, fileName) => downloadFile(bytes, fileName, importSourceMimeType.xlsx),
+      ),
+    );
   };
 
   return (

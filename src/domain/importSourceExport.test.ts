@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planResultSourceExport, planTestAssetSourceExport, sourceExportFileName, SOURCE_EXPORT_UNAVAILABLE, type SourceExportPlan } from './importSourceExport';
+import { planResultSourceExport, planTestAssetSourceExport, sourceExportFileName, SOURCE_EXPORT_UNAVAILABLE, verifySourceExportOutput, type SourceExportPlan } from './importSourceExport';
 import type { ColumnMapping } from './testAssetImport';
 import type { ResultColumnMapping } from './testResultImport';
 import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession, TestCase, TestResult, TestResultImport } from './types';
@@ -255,5 +255,49 @@ describe('내보내기 파일 이름', () => {
   it('원본 이름 뒤에 _Looma를 붙이고 확장자를 유지한다', () => {
     expect(sourceExportFileName('고객사_TC.xlsx')).toBe('고객사_TC_Looma.xlsx');
     expect(sourceExportFileName('a.b.XLSX')).toBe('a.b_Looma.XLSX');
+  });
+});
+
+/* ---------- 만든 파일 다시 읽기 확인(M1) ---------- */
+
+describe('내보낸 파일 다시 읽기 확인', () => {
+  const ready = () => {
+    const plan = planTestAssetSourceExport(session(), artifact(), [importedCase(0, { title: '이메일로 가입' }), importedCase(1)]);
+    if (!plan.ok) throw new Error(plan.problems.join('\n'));
+    return plan;
+  };
+  const table = (edit: (rows: string[][]) => void = () => undefined) => {
+    const rows = ROWS.map((row) => [...row]);
+    rows[0][3] = '이메일로 가입';
+    edit(rows);
+    return { headers: [...HEADERS], rows: rows.map((cells, index) => ({ rowNumber: index + 3, cells })) };
+  };
+
+  it('계획대로 바뀐 표면 문제가 없다', () => {
+    expect(verifySourceExportOutput(ready(), table())).toEqual([]);
+  });
+
+  it('바꾼 칸이 계획한 값과 다르면(줄바꿈 등) 문제다', () => {
+    expect(verifySourceExportOutput(ready(), table((rows) => (rows[0][3] = '이메일로\n가입')))).toEqual([expect.stringContaining('3행 테스트 항목: 내보낸 파일에 쓰인 값이 계획한 값과 달라요')]);
+  });
+
+  it('바꾸지 않은 칸 · 헤더 · 행 구성이 달라지면 문제다', () => {
+    expect(verifySourceExportOutput(ready(), table((rows) => (rows[1][7] = '바뀐 메모')))).toEqual([expect.stringContaining('4행 고객사 메모: 바꾸지 않은 칸의 값이 달라졌어요')]);
+    expect(verifySourceExportOutput(ready(), { ...table(), headers: ['다른', ...HEADERS.slice(1)] })[0]).toContain('헤더');
+    const extra = table();
+    extra.rows.push({ rowNumber: 9, cells: HEADERS.map(() => '') });
+    expect(verifySourceExportOutput(ready(), extra)[0]).toContain('행 구성');
+    expect(verifySourceExportOutput(ready(), undefined)[0]).toContain('다시 읽을 수 없어요');
+  });
+
+  it('다시 읽은 행이 지금 결과와 같은 뜻이 아니면 문제다', () => {
+    const changed = [RESULTS[0], { ...RESULTS[1], result: 'pass' as const }, RESULTS[2], RESULTS[3]];
+    const plan = planResultSourceExport(resultImport(), artifact(), changed);
+    if (!plan.ok) throw new Error(plan.problems.join('\n'));
+    const output = (iosValue: string) => ({ headers: [...RESULT_HEADERS], rows: [{ rowNumber: 2, cells: ['SIGN-001', 'P', iosValue, '재현'] }, { rowNumber: 3, cells: ['SIGN-002', 'p ', 'N/T', ''] }] });
+    expect(verifySourceExportOutput(plan, output('P'))).toEqual([]);
+    // 표를 비교하는 단계를 지나도 결과의 뜻이 다르면 잡는다(계획 자체를 바꿔 확인한다).
+    const tampered = { ...plan, patches: plan.patches.map((patch) => ({ ...patch, nextValue: 'F' })) };
+    expect(verifySourceExportOutput(tampered, output('F'))).toEqual([expect.stringContaining('2행(SIGN-001): 내보낸 파일을 다시 읽은 결과가 지금 결과(PASS)와 달라요')]);
   });
 });

@@ -77,7 +77,7 @@ describe('TC 원본 형식 내보내기 (가져오기부터 다시 읽기까지)
       testCase.status = 'deprecated';
     });
 
-    const outcome = await exportTestAssetSource(PROJECT_A, session.id, repos);
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
     if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
     expect(outcome.fileName).toBe('고객사_TC_Looma.xlsx');
     expect(outcome.changedCells).toEqual(['D4', 'F4']);
@@ -105,7 +105,7 @@ describe('TC 원본 형식 내보내기 (가져오기부터 다시 읽기까지)
   it('바뀐 값이 없으면 원본 bytes와 같은 파일을 내보낸다', async () => {
     const repos = await openRepos(createMemoryStateStore());
     const { original, session } = await importTestAssets(repos);
-    const outcome = await exportTestAssetSource(PROJECT_A, session.id, repos);
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
     if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
     expect(outcome.changedCells).toEqual([]);
     expect(outcome.bytes).toEqual(original);
@@ -121,9 +121,49 @@ describe('TC 원본 형식 내보내기 (가져오기부터 다시 읽기까지)
       const testCase = data.testCases.find((item) => item.importSource?.sessionId === session.id && item.importSource.rowNumber === 3)!;
       testCase.title = '바뀐 항목';
     });
-    const outcome = await exportTestAssetSource(PROJECT_A, session.id, repos);
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
     expect(outcome.ok).toBe(false);
     expect(!outcome.ok && outcome.problems[0]).toContain('D3(테스트 항목): 셀 값이 가져올 때와 달라요');
+  });
+
+  it('M1 · 만든 파일을 다시 읽은 값이 지금 TC와 다르면(단독 CR이 줄바꿈으로 바뀜) 파일을 내주지 않는다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { session } = await importTestAssets(repos);
+    await editState(store, repos, (data) => {
+      const testCase = data.testCases.find((item) => item.importSource?.sessionId === session.id && item.importSource.rowNumber === 3)!;
+      testCase.title = '바뀐\r제목';
+    });
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.problems[0]).toContain('다시 읽어 확인했더니');
+    expect(!outcome.ok && outcome.problems.join(' ')).toContain('3행 테스트 항목: 내보낸 파일에 쓰인 값이 계획한 값과 달라요');
+  });
+
+  it('별도 XML 검사기가 문제를 알리면 파일을 내주지 않는다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { session } = await importTestAssets(repos);
+    await editState(store, repos, (data) => {
+      data.testCases.find((item) => item.importSource?.sessionId === session.id && item.importSource.rowNumber === 3)!.title = '바뀐 항목';
+    });
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, validateXml: () => '검사 실패' });
+    expect(!outcome.ok && outcome.problems[0]).toContain('검사 실패');
+  });
+
+  it('원본 셀이 숫자 · 병합 · 수식이면 그 칸을 바꾸려 할 때 파일을 내주지 않는다(H3 · H4)', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { table, mapping, session } = await importTestAssets(repos);
+    // 매핑하지 않은 고객사 메모(병합 H4:H5)를 TC 필드로 연결했다고 가정하면 그 칸은 바꿀 수 없다.
+    const memo = table.headers.indexOf('고객사 메모');
+    await editState(store, repos, (data) => {
+      const saved = data.testAssetImports.find((item) => item.id === session.id)!;
+      saved.columnMapping = mapping.map((field, index) => (index === memo ? 'precondition' : field === 'precondition' ? null : field));
+      data.testCases.find((item) => item.importSource?.sessionId === session.id && item.importSource.rowNumber === 4)!.precondition = '병합 칸에 쓰기';
+    });
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
+    expect(!outcome.ok && outcome.problems.join(' ')).toContain('병합된 셀(H4:H5)');
   });
 
   it('원본을 보관하지 않은 가져오기는 다른 방식으로 대신 만들지 않는다', async () => {
@@ -136,7 +176,7 @@ describe('TC 원본 형식 내보내기 (가져오기부터 다시 읽기까지)
       mapping,
       decisions: [{ rowNumber: 3, kind: 'new', decision: 'import' }],
     });
-    const outcome = await exportTestAssetSource(PROJECT_A, withoutSource.id, repos);
+    const outcome = await exportTestAssetSource(PROJECT_A, withoutSource.id, { repos });
     expect(outcome).toEqual({ ok: false, problems: [expect.stringContaining('원본 형식을 유지한 XLSX 내보내기를 사용할 수 없어요.')] });
   });
 });
@@ -173,7 +213,7 @@ describe('수행 결과 원본 형식 내보내기', () => {
     const { original, saved } = await importResults(repos);
     expect(saved.resultColumnMapping).toEqual(['externalId', 'title', 'result_android', 'result_ios', null, 'note']);
 
-    const unchanged = await exportResultSource(PROJECT_A, saved.id, repos);
+    const unchanged = await exportResultSource(PROJECT_A, saved.id, { repos });
     expect(unchanged.ok && unchanged.bytes).toEqual(original);
 
     // 2행 iOS(F)를 pass로 바꾼다. 이 차수에서 pass 표기는 P와 PASS 둘이라 추측하지 않고 멈춘다.
@@ -181,7 +221,7 @@ describe('수행 결과 원본 형식 내보내기', () => {
       const result = data.results.find((item) => item.importId === saved.id && item.sourceRowNumber === 2 && item.platform === 'ios')!;
       result.result = 'pass';
     });
-    const ambiguous = await exportResultSource(PROJECT_A, saved.id, repos);
+    const ambiguous = await exportResultSource(PROJECT_A, saved.id, { repos });
     expect(!ambiguous.ok && ambiguous.problems[0]).toContain('표기가 여럿');
 
     // 3행 Android(PASS)를 fail로 바꾸면 이 차수의 fail 표기(F) 하나로 쓴다.
@@ -191,7 +231,7 @@ describe('수행 결과 원본 형식 내보내기', () => {
         if (result.sourceRowNumber === 3 && result.platform === 'android') result.result = 'fail';
       }
     });
-    const changed = await exportResultSource(PROJECT_A, saved.id, repos);
+    const changed = await exportResultSource(PROJECT_A, saved.id, { repos });
     if (!changed.ok) throw new Error(changed.problems.join('\n'));
     expect(changed.changedCells).toEqual(['C3']);
     expect(changedEntries(original, changed.bytes)).toEqual(['xl/worksheets/sheet4.xml']);

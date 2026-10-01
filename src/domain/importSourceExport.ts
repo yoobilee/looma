@@ -1,5 +1,5 @@
 import { resultImportFieldLabel, testAssetImportFieldLabel, testPerspectiveLabel, testResultLabel } from './labels';
-import { contentChanges, parseImportRow, type ColumnMapping, type ImportTableRow, type TestAssetImportField } from './testAssetImport';
+import { contentChanges, parseImportRow, type ColumnMapping, type ImportTable, type ImportTableRow, type TestAssetImportField } from './testAssetImport';
 import { platformResultFields, resultValueKey, type ResultColumnMapping } from './testResultImport';
 import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession, TestCase, TestResult, TestResultImport } from './types';
 
@@ -8,6 +8,7 @@ import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession
  * 파일 형식(XLSX XML)은 모른다. 모든 검증을 통과해야만 계획을 돌려주고, 하나라도 문제가 있으면 문제만 돌려준다.
  * - 행은 고객사 TC ID로 다시 찾지 않는다. 가져올 때 남긴 행 출처(TC: importSource, 결과: sourceRowNumber)만 쓴다.
  * - 가져올 때 매핑하지 않은 열은 바꾸지 않는다. 새 행은 만들지 않는다.
+ * - 만든 파일은 다시 읽어 verifySourceExportOutput으로 확인한다. 계획 단계의 확인만으로 끝내지 않는다.
  */
 
 export interface SourceCellPatch {
@@ -27,9 +28,20 @@ export interface SourceExportLayout {
   headers: string[];
 }
 
-export type SourceExportPlan =
-  | { ok: true; artifactId: string; fileName: string; layout: SourceExportLayout; patches: SourceCellPatch[]; notices: string[] }
-  | { ok: false; problems: string[] };
+export interface ReadySourceExportPlan {
+  ok: true;
+  artifactId: string;
+  fileName: string;
+  layout: SourceExportLayout;
+  patches: SourceCellPatch[];
+  notices: string[];
+  /** 가져올 때의 표. 내보낸 파일을 다시 읽은 표와 비교한다. */
+  snapshot: ImportSourceSnapshot;
+  /** 내보낸 파일을 다시 읽은 행이 지금 Looma 값(TC · 결과)과 같은지 확인한다. 문제를 돌려준다. */
+  verifyEntities: (rows: ReadonlyMap<number, ImportTableRow>) => string[];
+}
+
+export type SourceExportPlan = ReadySourceExportPlan | { ok: false; problems: string[] };
 
 export const SOURCE_EXPORT_UNAVAILABLE = '원본 형식을 유지한 XLSX 내보내기를 사용할 수 없어요.';
 
@@ -163,7 +175,17 @@ export function planTestAssetSourceExport(session: TestAssetImportSession, artif
   if (problems.length > 0) return { ok: false, problems };
   const notLinked = projectTestCases.filter((testCase) => testCase.importSource?.sessionId !== session.id).length;
   const notices = notLinked > 0 ? [`이 파일의 행과 연결되지 않은 TC ${notLinked}건(신규 TC 등)은 포함되지 않아요.`] : [];
-  return { ok: true, artifactId: ready.artifactId!, fileName: session.fileName, layout: ready.layout!, patches, notices };
+  const verifyEntities = (outputRows: ReadonlyMap<number, ImportTableRow>) =>
+    linked.flatMap((testCase) => {
+      const rowNumber = testCase.importSource!.rowNumber;
+      const row = outputRows.get(rowNumber);
+      if (!row) return [`${rowNumber}행: 내보낸 파일에서 이 행을 다시 읽을 수 없어요.`];
+      const reparsed = parseImportRow(row, mapping);
+      const different = Object.keys(contentChanges(reparsed, testCase, fields));
+      if (fields.has('externalId') && !sameText(reparsed.externalId, testCase.externalId)) different.push('externalId');
+      return different.length > 0 ? [`${rowNumber}행(${testCase.externalId ?? testCase.title}): 내보낸 파일을 다시 읽은 값이 지금 TC와 달라요. (${different.join(', ')})`] : [];
+    });
+  return { ok: true, artifactId: ready.artifactId!, fileName: session.fileName, layout: ready.layout!, patches, notices, snapshot: ready.snapshot, verifyEntities };
 }
 
 function sameSteps(cell: string, steps: string[]): boolean {
@@ -196,7 +218,8 @@ export function planResultSourceExport(resultImport: TestResultImport, artifact:
   const patches: SourceCellPatch[] = [];
   const claimed = new Map<string, string>();
 
-  for (const result of results.filter((item) => item.importId === resultImport.id)) {
+  const ownResults = results.filter((item) => item.importId === resultImport.id);
+  for (const result of ownResults) {
     const label = `${result.sourceRowNumber ?? '?'}행(${result.externalId ?? result.title}${result.platform ? ` · ${result.platform}` : ''})`;
     if (!result.sourceRowNumber) {
       problems.push(`${label}: 결과를 읽은 원본 행이 기록되어 있지 않아요.`);
@@ -231,7 +254,48 @@ export function planResultSourceExport(resultImport: TestResultImport, artifact:
   }
 
   if (problems.length > 0) return { ok: false, problems };
-  return { ok: true, artifactId: ready.artifactId!, fileName: resultImport.fileRef, layout: ready.layout!, patches, notices: [] };
+  const verifyEntities = (outputRows: ReadonlyMap<number, ImportTableRow>) =>
+    ownResults.flatMap((result) => {
+      const cell = outputRows.get(result.sourceRowNumber!)?.cells[resultColumn(mapping, result)];
+      return meaningByKey.get(resultValueKey(cell ?? '')) === result.result
+        ? []
+        : [`${result.sourceRowNumber}행(${result.externalId ?? result.title}): 내보낸 파일을 다시 읽은 결과가 지금 결과(${testResultLabel[result.result]})와 달라요.`];
+    });
+  return { ok: true, artifactId: ready.artifactId!, fileName: resultImport.fileRef, layout: ready.layout!, patches, notices: [], snapshot: ready.snapshot, verifyEntities };
+}
+
+/**
+ * 내보낸 파일을 가져오기와 같은 reader로 다시 읽은 표가 기대와 같은지 확인한다.
+ * - 바꾼 칸은 계획한 새 값과 정확히 같아야 한다(줄바꿈 · 공백 포함).
+ * - 바꾸지 않은 칸 · 헤더 · 행 구성은 가져올 때의 표와 정확히 같아야 한다.
+ * - 다시 읽은 행이 지금 TC · 결과와 같은 뜻이어야 한다.
+ * 하나라도 다르면 그 파일을 내려주지 않는다.
+ */
+export function verifySourceExportOutput(plan: ReadySourceExportPlan, output: ImportTable | undefined): string[] {
+  if (!output) return ['내보낸 파일에서 표를 다시 읽을 수 없어요.'];
+  const problems: string[] = [];
+  const { snapshot } = plan;
+  if (JSON.stringify(output.headers) !== JSON.stringify(snapshot.headers)) problems.push('내보낸 파일의 헤더가 가져올 때와 달라요.');
+  const outputRows = new Map(output.rows.map((row) => [row.rowNumber, row]));
+  const expected = new Map(snapshot.rows.map((row) => [row.rowNumber, [...row.cells]]));
+  for (const patch of plan.patches) expected.get(patch.rowNumber)![patch.columnIndex] = patch.nextValue;
+  const changedCell = new Set(plan.patches.map((patch) => `${patch.rowNumber}:${patch.columnIndex}`));
+  if (output.rows.length !== snapshot.rows.length || output.rows.some((row) => !expected.has(row.rowNumber))) problems.push('내보낸 파일의 행 구성이 가져올 때와 달라요.');
+  for (const [rowNumber, cells] of expected) {
+    const actual = outputRows.get(rowNumber)?.cells;
+    if (!actual) continue;
+    cells.forEach((value, column) => {
+      if (actual[column] === value) return;
+      const label = snapshot.headers[column];
+      problems.push(
+        changedCell.has(`${rowNumber}:${column}`)
+          ? `${rowNumber}행 ${label}: 내보낸 파일에 쓰인 값이 계획한 값과 달라요(줄바꿈 · 공백 등이 바뀌었을 수 있어요).`
+          : `${rowNumber}행 ${label}: 바꾸지 않은 칸의 값이 달라졌어요.`,
+      );
+    });
+  }
+  if (problems.length > 0) return problems;
+  return plan.verifyEntities(outputRows);
 }
 
 /** 원본 이름 뒤에 _Looma를 붙인다. 확장자는 유지한다. 예: 고객사_TC.xlsx → 고객사_TC_Looma.xlsx */

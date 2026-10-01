@@ -101,7 +101,7 @@ export function ImportHistoryTab() {
   return (
     <section className={styles.page} aria-labelledby="import-history-title">
       <SectionHeader id="import-history-title" title="가져오기 이력" meta={`${visible.length}건`} />
-      <p className={styles.intro}>원본 형식 내보내기는 가져온 원본 XLSX의 기존 행에만 지금 값을 반영해요. 신규 TC는 포함되지 않고, 원본 XLSX가 보관된 가져오기에서만 쓸 수 있어요.</p>
+      <p className={styles.intro}>원본 형식 내보내기는 가져온 원본 XLSX의 기존 문자열 셀에만 지금 값을 반영해요. 신규 TC는 포함되지 않고, 바꿀 칸이 수식 · 병합 · 숫자 셀이거나 원본에 없는 셀이면 파일을 만들지 않아요. 원본 XLSX가 보관된 가져오기에서만 쓸 수 있어요.</p>
       <FilterTabs
         label="가져오기 종류"
         value={filter}
