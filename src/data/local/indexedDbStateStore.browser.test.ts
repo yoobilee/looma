@@ -31,6 +31,47 @@ function isolatedFactory(): { factory: IDBFactory; name: string } {
   return { factory, name };
 }
 
+/**
+ * isolatedFactory에 관찰만 더한다. 제품 코드가 받는 IDBDatabase · IDBTransaction · IDBObjectStore · IDBRequest는 모두 실제 Chromium 객체 그대로다.
+ * - 연결: open 요청의 success 리스너를 제품 코드의 onsuccess보다 먼저 등록해, 그 연결의 transaction 메서드에만 관찰을 붙인다(prototype은 건드리지 않는다).
+ * - readwrite transaction: complete · abort 리스너를 제품 코드의 oncomplete · onabort보다 먼저 등록해 같은 이벤트의 시점을 기록한다.
+ * - state store의 put: 실제 put 요청을 돌려주기 전에 success 리스너를 붙여 기록한다.
+ * 리스너는 기록만 하고 이벤트를 막거나 값을 바꾸지 않는다.
+ */
+function observedFactory(log: string[]): { factory: IDBFactory; name: string } {
+  const { factory: isolated, name } = isolatedFactory();
+  const observeStore = (store: IDBObjectStore) => {
+    if (store.name !== 'state') return store;
+    const put = store.put.bind(store);
+    store.put = (...args: Parameters<IDBObjectStore['put']>) => {
+      const req = put(...args);
+      req.addEventListener('success', () => log.push('state-put-success'));
+      return req;
+    };
+    return store;
+  };
+  const observeDatabase = (database: IDBDatabase) => {
+    const begin = database.transaction.bind(database);
+    database.transaction = ((...args: Parameters<IDBDatabase['transaction']>) => {
+      const transaction = begin(...args);
+      if (transaction.mode !== 'readwrite') return transaction;
+      transaction.addEventListener('complete', () => log.push('transaction-complete'));
+      transaction.addEventListener('abort', () => log.push('transaction-abort'));
+      const objectStore = transaction.objectStore.bind(transaction);
+      transaction.objectStore = (storeName: string) => observeStore(objectStore(storeName));
+      return transaction;
+    }) as IDBDatabase['transaction'];
+  };
+  const factory = {
+    open: (dbName: string, version?: number) => {
+      const req = isolated.open(dbName, version);
+      req.addEventListener('success', () => observeDatabase(req.result));
+      return req;
+    },
+  } as Pick<IDBFactory, 'open'> as IDBFactory;
+  return { factory, name };
+}
+
 const request = <T>(req: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
@@ -186,6 +227,34 @@ describe('IndexedDB StateStore (실제 Chromium)', () => {
     const [fromA, fromB] = await Promise.all([tabA.initialize({ ...initialState(), savedAt: 'A' }), tabB.initialize({ ...initialState(), savedAt: 'B' })]);
     expect((fromA as StoredAppState).savedAt).toBe((fromB as StoredAppState).savedAt);
     expect((await inspectDatabase(name)).state.savedAt).toBe((fromA as StoredAppState).savedAt);
+  });
+
+  it('저장 Promise는 같은 native transaction의 complete 이벤트 뒤에만 끝나고, 취소되면 abort 이벤트 뒤에만 실패한다', async () => {
+    // 새 연결로 다시 읽는 확인은 앞선 readwrite transaction 뒤로 밀려 실행되므로, 저장이 너무 일찍 끝났다고 알리는 회귀를 잡지 못한다.
+    // 그래서 같은 transaction의 이벤트와 Promise 결과를 한 기록에 순서대로 남겨 직접 비교한다(시간 지연 없이 이벤트 순서만 사용).
+    const log: string[] = [];
+    const { factory } = observedFactory(log);
+    const store = await openIndexedDbStateStore(factory);
+    await store.initialize(initialState());
+
+    log.length = 0;
+    await store.commit(commitInput(1, '저장', [['src-1', '원본']]));
+    log.push('commit-resolved');
+    expect(log).toEqual(['state-put-success', 'transaction-complete', 'commit-resolved']);
+
+    log.length = 0;
+    await store.replaceAll({ schemaVersion: CURRENT_SCHEMA_VERSION, savedAt: '초기화', data: createSeed() });
+    log.push('replaceAll-resolved');
+    expect(log).toEqual(['state-put-success', 'transaction-complete', 'replaceAll-resolved']);
+
+    log.length = 0;
+    await store.commit(commitInput(3, '원본 추가', [['src-2', '원본']]));
+    log.length = 0;
+    await expectPersistenceError(
+      store.commit(commitInput(4, '중복', [['src-2', '덮어쓰기']])).finally(() => log.push('commit-rejected')),
+      'artifact_duplicate',
+    );
+    expect(log).toEqual(['transaction-abort', 'commit-rejected']);
   });
 
   it('저장이 끝났다고 알린 뒤에는 새 연결에서도 원본 bytes(Blob)와 상태가 그대로 보인다', async () => {

@@ -32,6 +32,7 @@ jobs:
       - run: npm ci
 
       # verify의 test:browser가 실제 Chromium IndexedDB로 저장소 회귀를 확인한다. 잠금 파일의 playwright 버전에 맞는 headless shell만 설치한다.
-      - run: npx playwright install --with-deps --only-shell chromium
+      # --no: npm ci로 설치한 playwright만 쓴다. 없으면 registry에서 받지 않고 실패한다(CI에서 npx는 기본으로 --yes).
+      - run: npx --no -- playwright install --with-deps --only-shell chromium
 
       - run: npm run verify
