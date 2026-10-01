@@ -14,6 +14,8 @@ export interface HeaderFields {
   compressedSize: number;
   uncompressedSize: number;
   name: Uint8Array;
+  /** extra field 영역(기본: 없음) */
+  extra?: Uint8Array;
 }
 
 export interface EntrySpec {
@@ -68,8 +70,9 @@ export const localHeader = (f: HeaderFields) =>
       v.setUint32(18, f.compressedSize, true);
       v.setUint32(22, f.uncompressedSize, true);
       v.setUint16(26, f.name.length, true);
+      v.setUint16(28, f.extra?.length ?? 0, true);
     },
-    [f.name],
+    [f.name, f.extra ?? new Uint8Array(0)],
   );
 
 export const centralHeader = (f: HeaderFields & { localOffset: number; diskStart: number }) =>
@@ -86,10 +89,11 @@ export const centralHeader = (f: HeaderFields & { localOffset: number; diskStart
       v.setUint32(20, f.compressedSize, true);
       v.setUint32(24, f.uncompressedSize, true);
       v.setUint16(28, f.name.length, true);
+      v.setUint16(30, f.extra?.length ?? 0, true);
       v.setUint16(34, f.diskStart, true);
       v.setUint32(42, f.localOffset, true);
     },
-    [f.name],
+    [f.name, f.extra ?? new Uint8Array(0)],
   );
 
 export const u32le = (...values: number[]) => record(values.length * 4, (v) => values.forEach((value, index) => v.setUint32(index * 4, value, true)));

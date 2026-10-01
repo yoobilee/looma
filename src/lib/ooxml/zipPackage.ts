@@ -1,14 +1,16 @@
-import { Inflate, zipSync } from 'fflate';
+import { zipSync } from 'fflate';
+import { Inflate } from 'pako';
 
 /*
  * XLSX(ZIP) 패키지를 안전하게 열고 다시 묶는다. 범용 ZIP 도구가 아니라 원본 고객사 파일을 고치기 전의 문이다.
  * 정상적인 classic ZIP만 받는다. 구조가 조금이라도 모호하거나 기록과 실제가 다르면 추측 · 복구하지 않고 거부한다.
  * - 끝 기록(EOCD) · 중앙 디렉터리 · 로컬 헤더를 직접 읽어 서로 맞춰 본다(이름 · 압축 방식 · 표시 · 크기 · CRC · 위치).
  * - 항목들은 파일 처음부터 중앙 디렉터리 앞까지 빈틈 · 겹침 없이 이어져야 한다. EOCD 뒤에 다른 데이터가 있으면 안 된다.
- * - 압축은 fflate의 streaming Inflate로 풀며 실제로 나온 bytes를 직접 센다. 결과 배열 길이만 믿지 않는다
- *   (fflate는 기록한 크기에 맞춰 결과를 잘라 돌려줄 수 있다). 기록보다 많이 나오면 그 자리에서 멈춘다.
+ * - 압축은 zlib inflate를 그대로 옮긴 pako로 푼다. zlib이 거부하는 DEFLATE 스트림(stored block LEN/NLEN 불일치,
+ *   잘못된 Huffman 표 · 거리 등)을 똑같이 거부한다. fflate Inflate는 이런 검사 일부를 하지 않아 손상된 스트림도 풀어 준다.
+ * - 실제로 나온 bytes를 직접 센다. 결과 배열 길이만 믿지 않고, 기록보다 많이 나오면 그 자리에서 멈춘다.
  * - 압축 데이터는 기록한 크기에서 정확히 끝나야 하고, 푼 내용의 CRC32가 기록과 같아야 한다.
- * - ZIP64 · 여러 디스크 · 암호화 · 지원하지 않는 압축 방식 · 알 수 없는 표시(flag)는 거부한다.
+ * - ZIP64(sentinel 값 · ZIP64 extra field) · 여러 디스크 · 암호화 · 지원하지 않는 압축 방식 · 알 수 없는 표시(flag)는 거부한다.
  */
 
 export class ZipPackageError extends Error {}
@@ -52,13 +54,11 @@ const FLAG = {
 };
 /** 허용하는 표시: DEFLATE 압축 옵션(1 · 2), data descriptor(3), UTF-8 이름(11). 그 밖의 표시는 거부한다. */
 const ALLOWED_FLAGS = 0x0002 | 0x0004 | FLAG.dataDescriptor | FLAG.utf8Name;
+const ZIP64_EXTRA_ID = 0x0001;
 const LOCAL_HEADER_SIZE = 30;
 const CENTRAL_HEADER_SIZE = 46;
 const END_RECORD_SIZE = 22;
-/**
- * 한 번에 푸는 압축 데이터 크기. DEFLATE 최대 압축률(약 1032배)로도 한 번에 약 16MB(항목 상한 아래)까지만 나오고,
- * 기록보다 많이 나온 것은 그 조각을 푼 직후 알아챈다.
- */
+/** 한 번에 꺼내는 압축 해제 결과 크기. 기록보다 많이 나온 것은 그 조각을 꺼낸 직후 알아챈다(압축 폭탄도 여기서 멈춘다). */
 const INFLATE_CHUNK_BYTES = 16 * 1024;
 
 const MB = (bytes: number) => `${Math.round(bytes / 1024 / 1024)}MB`;
@@ -88,7 +88,8 @@ export function crc32(data: Uint8Array): number {
 
 /** 패키지 안 경로로 쓸 수 있는 이름인가. 폴더 항목(끝이 /)은 허용한다. */
 function validEntryName(name: string): boolean {
-  if (name === '' || name.startsWith('/') || name.includes('\\')) return false;
+  // 절대 경로(/ · Windows 드라이브 C:)와 \ 구분자는 패키지 안 경로가 아니다.
+  if (name === '' || name.startsWith('/') || /^[A-Za-z]:/.test(name) || name.includes('\\')) return false;
   const segments = (name.endsWith('/') ? name.slice(0, -1) : name).split('/');
   return segments.every((segment) => segment !== '' && segment !== '.' && segment !== '..' && segment !== '__proto__');
 }
@@ -115,6 +116,20 @@ function reader(bytes: Uint8Array) {
       return view.getUint32(offset, true);
     },
   };
+}
+
+/**
+ * extra field 기록을 차례로 읽는다. ZIP64 정보(0x0001)는 classic 값이 sentinel이 아니어도 거부한다(값을 해석하는 reader마다 다르게 읽을 수 있다).
+ * 기록이 extra 영역에 딱 맞지 않으면 그 안에 무엇이 숨었는지 알 수 없으므로 거부한다.
+ */
+function checkExtraFields(u16: (offset: number) => number, start: number, length: number, name: string) {
+  const end = start + length;
+  for (let at = start; at < end; ) {
+    if (at + 4 > end) throw broken(`항목의 extra field 구조가 올바르지 않아요: ${name}`);
+    if (u16(at) === ZIP64_EXTRA_ID) throw unsupported('ZIP64');
+    at += 4 + u16(at + 2);
+    if (at > end) throw broken(`항목의 extra field 구조가 올바르지 않아요: ${name}`);
+  }
 }
 
 /** 끝 기록(EOCD)을 찾는다. 주석까지 포함해 파일 끝에 정확히 닿는 기록이 하나뿐이어야 한다. */
@@ -187,6 +202,7 @@ export function readZipDirectory(bytes: Uint8Array, limits = ZIP_LIMITS): ZipEnt
       throw new ZipPackageError('항목 이름이 올바른 UTF-8이 아니에요.');
     }
     if (!validEntryName(name)) throw new ZipPackageError(`지원하지 않는 항목 이름이 있어요. (${name})`);
+    checkExtraFields(u16, offset - extraLength - commentLength, extraLength, name);
     // OPC 파트 이름은 대소문자를 구분하지 않는다.
     const key = name.toLowerCase();
     if (seen.has(key)) throw new ZipPackageError(`같은 이름의 항목이 두 번 있어요. (${name})`);
@@ -221,6 +237,7 @@ export function readZipDirectory(bytes: Uint8Array, limits = ZIP_LIMITS): ZipEnt
     const dataStart = local + LOCAL_HEADER_SIZE + localNameLength + localExtraLength;
     const dataEnd = dataStart + compressedSize;
     if (dataEnd > directoryOffset) throw broken(`압축 데이터가 중앙 디렉터리를 침범해요: ${name}`);
+    checkExtraFields(u16, local + LOCAL_HEADER_SIZE + localNameLength, localExtraLength, name);
     let end = dataEnd;
     if (flags & FLAG.dataDescriptor) {
       const descriptorMatches = (at: number) => at + 12 <= directoryOffset && u32(at) === crc && u32(at + 4) === compressedSize && u32(at + 8) === uncompressedSize;
@@ -245,44 +262,37 @@ export function readZipDirectory(bytes: Uint8Array, limits = ZIP_LIMITS): ZipEnt
 
 /* ---------- 압축 풀기 ---------- */
 
-/** data를 작은 조각으로 나눠 푼다. 나온 조각마다 onChunk를 부른다. 스트림이 끝나지 않았으면 fflate가 예외를 던진다. */
-function inflateChunks(data: Uint8Array, onChunk: (chunk: Uint8Array) => void) {
-  const inflater = new Inflate(onChunk);
-  for (let offset = 0; offset < data.length; offset += INFLATE_CHUNK_BYTES) {
-    const end = Math.min(offset + INFLATE_CHUNK_BYTES, data.length);
-    inflater.push(data.subarray(offset, end), end === data.length);
-  }
-}
+/** pako Inflate의 zlib 스트림 상태. 타입 선언에는 없지만 pako 2 Inflate 객체의 필드다. */
+type InflateWithStream = Inflate & { strm: { avail_in: number } };
 
 /**
  * DEFLATE 데이터를 풀어 실제로 나온 bytes를 센다. 기록한 크기보다 하나라도 많아지면 그 자리에서 멈춘다.
- * 그 뒤 스트림이 압축 데이터 마지막 byte에서 끝나는지 확인한다(마지막 byte 없이도 풀리면 뒤에 남는 데이터가 있다).
+ * 스트림은 zlib 기준으로 올바르게 끝나야 하고(손상 · 끊김 거부), 끝난 뒤 남는 압축 데이터가 없어야 한다.
  */
-function inflateExactly(data: Uint8Array, expectedSize: number, name: string): Uint8Array {
+export function inflateExactly(data: Uint8Array, expectedSize: number, name: string): Uint8Array {
   const out = new Uint8Array(expectedSize);
   let written = 0;
+  let status: number | undefined;
+  const inflater = new Inflate({ raw: true, chunkSize: INFLATE_CHUNK_BYTES }) as InflateWithStream;
+  inflater.onData = (chunk) => {
+    const bytes = chunk as Uint8Array;
+    if (written + bytes.length > expectedSize) throw broken(`압축을 풀면 기록된 크기보다 커요: ${name}`);
+    out.set(bytes, written);
+    written += bytes.length;
+  };
+  // 스트림이 끝나거나(0) zlib이 거부할 때(0이 아닌 값)만 불린다. 입력이 모자라 끝나지 않으면 불리지 않는다.
+  inflater.onEnd = (code) => {
+    status = code;
+  };
   try {
-    inflateChunks(data, (chunk) => {
-      if (written + chunk.length > expectedSize) throw broken(`압축을 풀면 기록된 크기보다 커요: ${name}`);
-      out.set(chunk, written);
-      written += chunk.length;
-    });
+    inflater.push(data, true);
   } catch (error) {
     if (error instanceof ZipPackageError) throw error;
     throw broken(`압축 데이터가 손상되었거나 중간에 끊겼어요: ${name}`);
   }
+  if (status !== 0) throw broken(`압축 데이터가 손상되었거나 중간에 끊겼어요: ${name}`);
+  if (inflater.strm.avail_in !== 0) throw broken(`압축 데이터 뒤에 알 수 없는 데이터가 있어요: ${name}`);
   if (written !== expectedSize) throw broken(`압축을 푼 크기가 기록과 달라요: ${name}`);
-
-  let endsEarly = data.length < 2;
-  if (!endsEarly) {
-    try {
-      inflateChunks(data.subarray(0, data.length - 1), () => undefined);
-      endsEarly = true;
-    } catch {
-      // 마지막 byte가 있어야 스트림이 끝난다. 정상이다.
-    }
-  }
-  if (endsEarly) throw broken(`압축 데이터 뒤에 알 수 없는 데이터가 있어요: ${name}`);
   return out;
 }
 

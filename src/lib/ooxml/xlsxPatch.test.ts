@@ -481,11 +481,15 @@ describe('ZIP 패키지 방어', () => {
     expect(() => unzipPackage(renameEntry(base, 'xl/two.xml', 'xl/one.xml'))).toThrow('같은 이름의 항목');
   });
 
-  it('__proto__ · .. · 역슬래시 같은 이름의 항목은 거부한다', () => {
+  it('__proto__ · .. · 역슬래시 · Windows 드라이브 경로 같은 이름의 항목은 거부한다', () => {
     const base = zipSync({ 'xl/abcdefghi': strToU8('x'), 'a/bb/c.xml': strToU8('y') });
     expect(() => readZipDirectory(renameEntry(base, 'xl/abcdefghi', 'xl/__proto__'))).toThrow('지원하지 않는 항목 이름');
     expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'a/../c.xml'))).toThrow('지원하지 않는 항목 이름');
     expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', '/a/b/c.xml'))).toThrow('지원하지 않는 항목 이름');
     expect(() => readZipDirectory(zipSync({ 'q\\.xml': strToU8('z') }))).toThrow('지원하지 않는 항목 이름');
+    expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'C:/root.xm'))).toThrow('지원하지 않는 항목 이름');
+    expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'c:root.xml'))).toThrow('지원하지 않는 항목 이름');
+    // 첫 경로 조각이 아닌 곳의 콜론은 드라이브 경로가 아니다.
+    expect(readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'a/b:/c.xml')).map((entry) => entry.name)).toContain('a/b:/c.xml');
   });
 });

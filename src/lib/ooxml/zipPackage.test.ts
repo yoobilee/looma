@@ -1,8 +1,9 @@
 /// <reference types="node" />
+import { constants, inflateRawSync } from 'node:zlib';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { buildZip, centralHeader, concat, deflateRawSync, localHeader, nodeCrc32, record, u32le, type EntrySpec } from './__fixtures__/zipBuilder';
-import { assertPackageContent, crc32, readZipDirectory, unzipPackage, ZIP_LIMITS, ZipPackageError } from './zipPackage';
+import { assertPackageContent, crc32, inflateExactly, readZipDirectory, unzipPackage, ZIP_LIMITS, ZipPackageError } from './zipPackage';
 
 /* 손상 · 변형된 ZIP은 __fixtures__/zipBuilder로 byte 단위로 만든다(Node zlib 기반, reader 코드와 독립). */
 
@@ -221,6 +222,24 @@ describe('G · ZIP64', () => {
     rejects(buildZip({ entries: baseEntries(), end: { size: 0xffffffff } }), ZIP64);
   });
 
+  it('classic 값이 sentinel이 아니어도 ZIP64 extra field(0x0001)가 있으면 거부한다', () => {
+    const zip64 = concat([record(4, (v) => (v.setUint16(0, 0x0001, true), v.setUint16(2, 16, true))), new Uint8Array(16)]);
+    rejects(buildZip({ entries: withEntry(1, { central: { extra: zip64 } }) }), ZIP64);
+    rejects(buildZip({ entries: withEntry(1, { local: { extra: zip64 } }) }), ZIP64);
+    // 다른 extra 뒤에 숨어 있어도 찾는다.
+    const padding = concat([record(4, (v) => (v.setUint16(0, 0xa220, true), v.setUint16(2, 4, true))), new Uint8Array(4)]);
+    rejects(buildZip({ entries: withEntry(1, { local: { extra: concat([padding, zip64]) } }) }), ZIP64);
+  });
+
+  it('Excel이 쓰는 extra(0xA220 padding)는 읽고, 영역에 맞지 않는 extra 기록은 거부한다', () => {
+    // Excel 16.0이 저장한 XLSX의 로컬 헤더 extra와 같은 모양(0xA220, 기록 크기 516)
+    const padding = concat([record(8, (v) => (v.setUint16(0, 0xa220, true), v.setUint16(2, 516, true), v.setUint16(4, 0xa028, true))), new Uint8Array(512)]);
+    expect(unzipPackage(buildZip({ entries: withEntry(1, { local: { extra: padding } }) })).entries.get('xl/media/image1.png')).toEqual(IMAGE);
+    const overrun = record(4, (v) => (v.setUint16(0, 0xa220, true), v.setUint16(2, 8, true)));
+    rejects(buildZip({ entries: withEntry(1, { local: { extra: overrun } }) }), '항목의 extra field 구조가 올바르지 않아요');
+    rejects(buildZip({ entries: withEntry(1, { central: { extra: new Uint8Array(3) } }) }), '항목의 extra field 구조가 올바르지 않아요');
+  });
+
   it('ZIP64 끝 기록 위치(locator)가 있으면 거부한다', () => {
     rejects(buildZip({ entries: baseEntries(), beforeEnd: concat([u32le(0x07064b50, 0), new Uint8Array(12)]) }), ZIP64);
   });
@@ -248,6 +267,120 @@ describe('H · 끊기거나 뒤에 데이터가 남은 압축 데이터', () => 
     rejects(buildZip({ entries: withEntry(1, { data: new Uint8Array(0), content: new Uint8Array(0), local: empty, central: empty }) }), '압축 데이터가 비어 있어요');
     const invalid = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
     rejects(buildZip({ entries: withEntry(1, { data: invalid, local: { compressedSize: 4 }, central: { compressedSize: 4 } }) }), '압축 데이터가 손상되었거나 중간에 끊겼어요');
+  });
+});
+
+/** raw DEFLATE bytes를 압축 데이터로 쓰는 ZIP. 기록(크기 · CRC)은 content 기준으로 맞춘다. */
+const deflateEntryZip = (data: Uint8Array, content: Uint8Array) => buildZip({ entries: withEntry(1, { data, content }) });
+const hex = (value: string) => Uint8Array.from(value.split(' ').map((byte) => parseInt(byte, 16)));
+/** Node zlib 판단: 오류 없이 풀리고, 입력을 끝까지 쓴 스트림만 정상이다. */
+function nodeInflate(data: Uint8Array): Uint8Array | Error {
+  try {
+    const { buffer, engine } = inflateRawSync(data, { info: true }) as unknown as { buffer: Buffer; engine: { bytesWritten: number } };
+    return engine.bytesWritten === data.length ? new Uint8Array(buffer) : new Error('trailing data');
+  } catch (error) {
+    return error as Error;
+  }
+}
+const CORRUPT = '압축 데이터가 손상되었거나 중간에 끊겼어요';
+
+describe('I · DEFLATE stored block (LEN/NLEN)', () => {
+  it('독립 리뷰 재현: LEN=1 · NLEN=FFFF(정상은 FFFE)는 Node zlib처럼 거부한다(fflate는 "A"로 푼다)', () => {
+    const data = hex('01 01 00 ff ff 41');
+    expect(() => inflateRawSync(data)).toThrow('invalid stored block lengths');
+    const bytes = deflateEntryZip(data, text('A'));
+    // 원인: fflate Inflate는 stored block의 NLEN을 읽지 않는다.
+    expect(unzipSync(bytes)['xl/media/image1.png']).toEqual(text('A'));
+    rejects(bytes, `${CORRUPT}: xl/media/image1.png`);
+    expect(() => inflateExactly(data, 1, 'x')).toThrow(CORRUPT);
+  });
+
+  it('정상 stored block(LEN=1 · NLEN=FFFE)은 풀고 CRC · 크기가 맞으면 읽는다', () => {
+    const data = hex('01 01 00 fe ff 41');
+    expect(nodeInflate(data)).toEqual(text('A'));
+    expect(unzipPackage(deflateEntryZip(data, text('A'))).entries.get('xl/media/image1.png')).toEqual(text('A'));
+  });
+
+  it('LEN=0 · LEN=65535 경계에서 NLEN이 맞으면 읽고, 틀리면 거부한다', () => {
+    expect(unzipPackage(deflateEntryZip(hex('01 00 00 ff ff'), new Uint8Array(0))).entries.get('xl/media/image1.png')).toEqual(new Uint8Array(0));
+    rejects(deflateEntryZip(hex('01 00 00 00 00'), new Uint8Array(0)), CORRUPT);
+    const full = new Uint8Array(65535).map((_, index) => index % 251);
+    expect(unzipPackage(deflateEntryZip(concat([hex('01 ff ff 00 00'), full]), full)).entries.get('xl/media/image1.png')).toEqual(full);
+    const wrong = concat([hex('01 ff ff 01 00'), full]);
+    expect(nodeInflate(wrong)).toBeInstanceOf(Error);
+    rejects(deflateEntryZip(wrong, full), CORRUPT);
+  });
+
+  it('payload가 LEN보다 짧거나, 헤더(LEN/NLEN) 중간에서 끊기면 거부한다', () => {
+    for (const data of [hex('01 05 00 fa ff 41 42'), hex('01 01 00 fe ff'), hex('01 01 00 fe'), hex('01 01')]) {
+      expect(nodeInflate(data)).toBeInstanceOf(Error);
+      rejects(deflateEntryZip(data, text('A')), CORRUPT);
+    }
+  });
+
+  it('stored block 여러 개 · stored block 뒤 Huffman block이 이어지는 정상 스트림을 읽는다', () => {
+    const stored = hex('00 01 00 fe ff 41 00 01 00 fe ff 42 01 01 00 fe ff 43');
+    expect(unzipPackage(deflateEntryZip(stored, text('ABC'))).entries.get('xl/media/image1.png')).toEqual(text('ABC'));
+    const mixed = concat([hex('00 01 00 fe ff 41'), new Uint8Array(deflateRawSync(IMAGE, { strategy: constants.Z_FIXED }))]);
+    const content = concat([text('A'), IMAGE]);
+    expect(nodeInflate(mixed)).toEqual(content);
+    expect(unzipPackage(deflateEntryZip(mixed, content)).entries.get('xl/media/image1.png')).toEqual(content);
+  });
+
+  it('Huffman block 뒤에 오는 stored block의 NLEN이 틀려도 거부한다(첫 블록만 보는 검사로는 못 막는 경우)', () => {
+    // Z_SYNC_FLUSH 출력은 Huffman block 뒤에 빈 stored block(00 00 FF FF)으로 끝난다. 그 NLEN을 망가뜨리고 마지막 빈 블록을 붙인다.
+    const flushed = new Uint8Array(deflateRawSync(IMAGE, { finishFlush: constants.Z_SYNC_FLUSH }));
+    expect([...flushed.subarray(-4)]).toEqual([0x00, 0x00, 0xff, 0xff]);
+    const valid = concat([flushed, hex('03 00')]);
+    expect(nodeInflate(valid)).toEqual(IMAGE);
+    expect(unzipPackage(deflateEntryZip(valid, IMAGE)).entries.get('xl/media/image1.png')).toEqual(IMAGE);
+    const broken = concat([flushed.subarray(0, -2), hex('00 00 03 00')]);
+    expect(nodeInflate(broken)).toBeInstanceOf(Error);
+    expect(unzipSync(deflateEntryZip(broken, IMAGE))['xl/media/image1.png']).toEqual(IMAGE);
+    rejects(deflateEntryZip(broken, IMAGE), CORRUPT);
+  });
+});
+
+describe('J · DEFLATE 판단이 Node zlib과 같다 (bit 하나씩 바꾼 스트림)', () => {
+  const xml = text(`<worksheet>${Array.from({ length: 40 }, (_, index) => `<row r="${index + 1}"><c r="A${index + 1}" t="s"><v>${(index * 7) % 13}</v></c></row>`).join('')}</worksheet>`);
+  const streams: [string, Uint8Array][] = [
+    ['dynamic Huffman', new Uint8Array(deflateRawSync(xml))],
+    ['fixed Huffman', new Uint8Array(deflateRawSync(IMAGE, { strategy: constants.Z_FIXED }))],
+    ['stored', new Uint8Array(deflateRawSync(text('stored block'), { level: 0 }))],
+    ['stored + Huffman', concat([new Uint8Array(deflateRawSync(text('AB'), { level: 0, finishFlush: constants.Z_SYNC_FLUSH })), new Uint8Array(deflateRawSync(IMAGE))])],
+  ];
+
+  /** 같으면 undefined, 다르면 그 이유 */
+  function compareWithNode(data: Uint8Array): string | undefined {
+    const expected = nodeInflate(data);
+    let actual: Uint8Array | Error;
+    try {
+      // Node가 거부한 스트림은 크기 기록을 넉넉히 줘서, 크기 비교가 아니라 스트림 검사로 거부되는지 본다.
+      actual = inflateExactly(data, expected instanceof Error ? 64 * 1024 : expected.length, 'x');
+    } catch (error) {
+      actual = error as Error;
+    }
+    if (expected instanceof Error) {
+      if (!(actual instanceof ZipPackageError) || !/손상되었거나 중간에 끊겼어요|뒤에 알 수 없는 데이터/.test(actual.message)) return `Node는 거부, Looma는 ${actual instanceof Error ? actual.message : '받음'}`;
+      return undefined;
+    }
+    if (actual instanceof Error) return `Node는 받음, Looma는 ${actual.message}`;
+    return actual.length === expected.length && actual.every((byte, index) => byte === expected[index]) ? undefined : '푼 내용이 Node와 달라요';
+  }
+
+  it.each(streams)('%s: Node zlib이 받는 스트림만 받고, 결과도 같다', (_, original) => {
+    const mismatches: string[] = [];
+    let accepted = 0;
+    for (let bit = 0; bit < original.length * 8; bit += 1) {
+      const data = original.slice();
+      data[bit >> 3] ^= 1 << (bit & 7);
+      if (!(nodeInflate(data) instanceof Error)) accepted += 1;
+      const mismatch = compareWithNode(data);
+      if (mismatch) mismatches.push(`bit ${bit}: ${mismatch}`);
+    }
+    expect(mismatches).toEqual([]);
+    // 바꾼 스트림 중 일부는 다른 내용으로 정상 해제된다(양쪽 판단이 실제로 갈릴 수 있는 입력을 함께 확인한다).
+    expect(accepted).toBeGreaterThan(0);
   });
 });
 

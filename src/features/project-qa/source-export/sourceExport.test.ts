@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { inflateRawSync } from 'node:zlib';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createLocalRepositories } from '@/data/local/localRepositories';
@@ -305,6 +306,42 @@ describe('ZIP 무결성 (독립 리뷰 재현)', () => {
     expect(state.status).toBe('failed');
     expect(download).not.toHaveBeenCalled();
     expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(malformed);
+  });
+
+  /** 'A' 한 글자를 raw DEFLATE stored block으로 담은 파트를 붙인다. 기록(크기 · CRC)은 'A' 기준으로 맞다. */
+  const fixtureWithStoredBlock = (deflate: number[]) => rebuildZip(unzipSync(fixtureBytes()), undefined, [{ name: 'xl/media/image1.png', content: strToU8('A'), data: Uint8Array.from(deflate) }]);
+  const BAD_NLEN = [0x01, 0x01, 0x00, 0xff, 0xff, 0x41];
+
+  it('독립 리뷰 재현: stored block LEN/NLEN이 맞지 않으면 바꾼 값이 있든 없든 파일을 만들지 않고 다운로드도 하지 않는다', async () => {
+    const malformed = fixtureWithStoredBlock(BAD_NLEN);
+    expect(() => inflateRawSync(Uint8Array.from(BAD_NLEN))).toThrow('invalid stored block lengths');
+    expect(unzipSync(malformed)['xl/media/image1.png']).toEqual(strToU8('A'));
+    const problem = 'XLSX(ZIP) 구조가 올바르지 않아 내보낼 수 없어요. (압축 데이터가 손상되었거나 중간에 끊겼어요: xl/media/image1.png)';
+
+    for (const edited of [false, true]) {
+      const store = createMemoryStateStore();
+      const repos = await openRepos(store);
+      const { session } = await importTestAssets(repos, malformed);
+      if (edited) await editRow3Title(store, repos, session.id);
+      const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
+      expect(!outcome.ok && outcome.problems).toEqual([problem]);
+      const download = vi.fn();
+      const state = await runSourceExport(() => exportTestAssetSource(PROJECT_A, session.id, { repos }), download);
+      expect(state.status).toBe('failed');
+      expect(download).not.toHaveBeenCalled();
+      expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(malformed);
+    }
+  });
+
+  it('정상 stored block(NLEN=FFFE)은 내보내고 그 파트를 그대로 유지한다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { session } = await importTestAssets(repos, fixtureWithStoredBlock([0x01, 0x01, 0x00, 0xfe, 0xff, 0x41]));
+    await editRow3Title(store, repos, session.id);
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
+    if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
+    expect(outcome.changedCells).toHaveLength(1);
+    expect(unzipSync(outcome.bytes)['xl/media/image1.png']).toEqual(strToU8('A'));
   });
 });
 
