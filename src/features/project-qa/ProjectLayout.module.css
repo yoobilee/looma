@@ -194,3 +194,18 @@
     text-align: center;
   }
 }
+
+/* 640px 이하: 단계 탭을 숨기고 현재 섹션 메뉴만 보여 준다. */
+.compactNav {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .compactNav {
+    display: block;
+  }
+
+  .tabs {
+    display: none;
+  }
+}
