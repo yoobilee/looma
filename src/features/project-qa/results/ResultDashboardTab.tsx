@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Upload } from 'lucide-react';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
 import {
@@ -55,7 +55,9 @@ function groupRetests(results: TestResult[]) {
  */
 export function ResultDashboardTab() {
   const { project } = useProjectContext();
-  const [selectedImportId, setSelectedImportId] = useState<string | null>(null);
+  // 가져오기 이력에서 `?import=<id>`로 들어오면 그 차수를 먼저 보여 준다. 없는 id면 기존처럼 최신 차수다.
+  const [searchParams] = useSearchParams();
+  const [selectedImportId, setSelectedImportId] = useState<string | null>(searchParams.get('import'));
   const [uploadOpen, setUploadOpen] = useState(false);
   const [showAllRetests, setShowAllRetests] = useState(false);
 

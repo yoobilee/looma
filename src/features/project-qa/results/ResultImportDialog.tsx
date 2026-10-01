@@ -256,7 +256,7 @@ export function ResultImportDialog({ open, onClose, projectId, platforms, testCa
     <Dialog
       open={open}
       onClose={onClose}
-      width="lg"
+      width="xl"
       title="수행 결과 가져오기"
       description="고객사 양식에서 수행을 마친 파일을 새 수행 차수로 저장해요. TC 정의는 바꾸지 않고, 저장 확인 전까지는 아무것도 바뀌지 않아요."
       footer={footer}

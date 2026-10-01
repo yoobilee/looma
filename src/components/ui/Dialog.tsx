@@ -9,7 +9,7 @@ interface DialogProps {
   description?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
-  width?: 'sm' | 'md' | 'lg';
+  width?: 'sm' | 'md' | 'lg' | 'xl';
   placement?: 'center' | 'top';
 }
 

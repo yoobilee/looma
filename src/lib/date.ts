@@ -58,6 +58,13 @@ export function formatShortDate(iso: string): string {
   return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
 }
 
+/** 2026.10.01 10:32 형태 */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function formatDateRange(start?: string, end?: string): string {
   if (!start && !end) return '기간 미정';
   if (start && end) return `${formatShortDate(start)}–${formatShortDate(end)}`;

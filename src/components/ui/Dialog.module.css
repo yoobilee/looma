@@ -33,6 +33,11 @@
   width: 680px;
 }
 
+/* 넓은 미리보기 표가 있는 대화상자용. max-width 규칙으로 작은 화면에서는 그대로 화면 안에 들어온다. */
+.xl {
+  width: 940px;
+}
+
 .panel {
   display: flex;
   flex-direction: column;

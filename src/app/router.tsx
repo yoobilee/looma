@@ -32,6 +32,7 @@ export const router = createBrowserRouter([
           { path: 'test-design', lazy: page(() => import('@/features/project-qa/test-design/TestDesignTab'), 'TestDesignTab') },
           { path: 'results', lazy: page(() => import('@/features/project-qa/results/ResultDashboardTab'), 'ResultDashboardTab') },
           { path: 'issues', lazy: page(() => import('@/features/project-qa/issues/IssuesTab'), 'IssuesTab') },
+          { path: 'import-history', lazy: page(() => import('@/features/project-qa/import-history/ImportHistoryTab'), 'ImportHistoryTab') },
           { path: 'records', lazy: page(() => import('@/features/project-qa/records/ProjectRecordsTab'), 'ProjectRecordsTab') },
         ],
       },
