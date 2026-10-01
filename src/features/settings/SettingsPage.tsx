@@ -1,7 +1,11 @@
+import { useState } from 'react';
 import { useTheme } from '@/app/themeContext';
+import { usePersistenceStatus } from '@/app/usePersistenceStatus';
+import { Button } from '@/components/ui/Button';
 import type { ThemePreference } from '@/domain/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { LocalDataResetDialog } from './LocalDataResetDialog';
 import styles from './SettingsPage.module.css';
 
 const themeOptions: { value: ThemePreference; label: string; description: string }[] = [
@@ -18,10 +22,14 @@ const integrations = [
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
+  const persistence = usePersistenceStatus();
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+  const savedLocally = persistence.state === 'ready' && persistence.mode === 'local';
 
   return (
     <>
-      <PageHeader eyebrow="설정" title="테마와 연결" />
+      <PageHeader eyebrow="설정" title="테마 · 연결 · 데이터" />
 
       <div className={styles.layout}>
         <section aria-labelledby="theme-title">
@@ -53,6 +61,27 @@ export function SettingsPage() {
               </li>
             ))}
           </ul>
+        </section>
+
+        <section aria-labelledby="local-data-title">
+          <SectionHeader id="local-data-title" title="로컬 데이터" meta={savedLocally ? '이 브라우저에 저장 중' : '저장하지 않는 모드'} />
+          <div className={styles.localData}>
+            <p>
+              업무 · 프로젝트 · TC · 수행 결과와 가져온 원본 파일은 이 브라우저에만 저장돼요. 서버로 보내지 않아요. 다른 브라우저나 기기와는 공유되지 않아요.
+            </p>
+            <p className={styles.note}>초기화하면 저장된 작업 데이터와 가져온 원본 파일을 모두 삭제하고 예시 데이터로 다시 시작해요.</p>
+            <div>
+              <Button variant="secondary" onClick={() => setResetOpen(true)}>
+                로컬 데이터 초기화
+              </Button>
+            </div>
+            {resetDone && (
+              <p className={styles.note} role="status">
+                예시 데이터로 초기화했어요.
+              </p>
+            )}
+          </div>
+          <LocalDataResetDialog open={resetOpen} onClose={() => setResetOpen(false)} onDone={() => setResetDone(true)} />
         </section>
       </div>
     </>

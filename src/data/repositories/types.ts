@@ -5,6 +5,8 @@ import type {
   Deliverable,
   DuplicateResolution,
   DeliverableType,
+  ImportSourceArtifact,
+  ImportSourceFormat,
   Issue,
   IssueStatus,
   IssueType,
@@ -32,8 +34,9 @@ import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/d
 import type { ResultColumnMapping, ResultCycleInput, ResultImportRowDecision, ResultValueDecision } from '@/domain/testResultImport';
 
 // UI는 이 인터페이스만 사용한다.
-// 1차 구현은 data/mock의 메모리 구현을 쓰고, 이후 Supabase나 실제 연동 구현으로 교체한다.
+// 지금은 data/local의 브라우저 저장(IndexedDB) 구현을 쓰고, 이후 Supabase나 실제 연동 구현으로 교체한다.
 // 모든 메서드는 Promise를 반환해 실제 네트워크 구현과 호출 방식을 맞춘다.
+// 변경 메서드는 저장에 성공했을 때만 resolve한다. 저장에 실패하면 PersistenceError로 reject하고 아무것도 바꾸지 않는다.
 
 export interface CreateTaskInput {
   title: string;
@@ -102,12 +105,21 @@ export interface TestCaseRepository {
   updateStatus(id: string, status: TestCaseStatus): Promise<TestCase>;
 }
 
+/** 가져온 원본 파일. 표를 읽은 바로 그 bytes를 넘긴다(다시 쓴 파일이 아니다). */
+export interface ImportSourceFileInput {
+  bytes: Blob;
+  format: ImportSourceFormat;
+  sheetName?: string;
+}
+
 export interface ApplyTestAssetImportInput {
   projectId: string;
   fileName: string;
   table: ImportTable;
   mapping: ColumnMapping;
   decisions: TestAssetImportRowDecision[];
+  /** 있으면 원본 파일 · layout snapshot · 열 매핑을 가져오기 기록과 한 번에 저장한다. */
+  source?: ImportSourceFileInput;
 }
 
 /** 고객사 TC 파일을 기준 TC로 가져온다. 수행 결과 업로드와 별개다. */
@@ -130,6 +142,51 @@ export interface ImportTestResultsInput {
   rowDecisions: ResultImportRowDecision[];
   /** 알 수 없는 결과 원문 키별 판단 */
   valueDecisions: Record<string, ResultValueDecision>;
+  /** 있으면 원본 파일 · layout snapshot · 열 매핑을 차수와 한 번에 저장한다. */
+  source?: ImportSourceFileInput;
+}
+
+/**
+ * 가져오기 원본 파일. 메타데이터는 앱 상태에, bytes는 별도 저장소에 있다(이후 DB · Storage로 나눠 교체할 수 있다).
+ * 원본은 가져오기와 함께만 만들어지고 바뀌지 않는다. 지우는 것은 로컬 데이터 초기화뿐이다.
+ */
+export interface ImportSourceArtifactRepository {
+  get(id: string): Promise<ImportSourceArtifact | undefined>;
+  /**
+   * 원본 bytes. 기록이 없으면 undefined.
+   * 기록은 있는데 파일이 없거나 크기가 다르면 PersistenceError(artifact_missing · artifact_corrupt)를 던진다.
+   */
+  getBytes(id: string): Promise<Uint8Array | undefined>;
+}
+
+/** 로컬 저장 상태. ready가 아니면 화면을 띄우지 않는다. */
+export type PersistenceStatus =
+  | { state: 'loading' }
+  | {
+      state: 'ready';
+      /** local: 브라우저에 저장, memory: 사용자가 고른 저장하지 않는 모드 */
+      mode: 'local' | 'memory';
+      revision: number;
+      savedAt: string;
+      /** 다른 탭이 더 새 데이터를 저장했다. 다시 불러오기 전까지 저장하지 않는다. */
+      stale: boolean;
+      /** 마지막 저장 실패 안내 */
+      error?: string;
+    }
+  | { state: 'blocked'; reason: 'unavailable' | 'read_failed' | 'corrupt' | 'unsupported_version' | 'migration_failed'; message: string };
+
+export interface PersistenceController {
+  getStatus(): PersistenceStatus;
+  subscribe(listener: () => void): () => void;
+  /** 저장된 데이터를 읽는다. 처음이면 예시 데이터를 만들어 저장한다. */
+  load(): Promise<void>;
+  /** 다른 탭이 저장한 최신 데이터로 바꾼다. */
+  reloadLatest(): Promise<void>;
+  /** 저장된 데이터와 원본 파일을 모두 지우고 지금 기준 예시 데이터로 바꾼다. 실패하면 기존 데이터를 그대로 둔다. */
+  resetToSeed(): Promise<void>;
+  /** 로컬 저장소를 쓸 수 없을 때 사용자가 고른 경우에만, 저장하지 않는 모드로 연다. */
+  continueWithoutSaving(): Promise<void>;
+  dismissError(): void;
 }
 
 export interface TestResultRepository {
@@ -235,6 +292,7 @@ export interface Repositories {
   testCases: TestCaseRepository;
   testAssetImports: TestAssetImportRepository;
   testResults: TestResultRepository;
+  importSources: ImportSourceArtifactRepository;
   issues: IssueRepository;
   knowledge: KnowledgeRepository;
   scratch: ScratchRepository;
@@ -243,4 +301,5 @@ export interface Repositories {
   calendar: CalendarRepository;
   /** 데이터가 바뀌면 호출된다. 반환 함수로 구독을 해제한다. */
   subscribe(listener: () => void): () => void;
+  persistence: PersistenceController;
 }

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ImportTable } from '@/domain/testAssetImport';
+import type { ImportSourceFileInput } from '@/data/repositories/types';
 import { readImportFile, type ImportFileSource, type ImportTableResult } from './importFile';
 
 /**
@@ -69,6 +70,10 @@ export function useImportFile(onTableChange: (table: ImportTable | undefined) =>
     showTable(source.readTable(name));
   };
 
+  /** 원본 파일로 함께 저장할 값. 표를 읽은 파일 · 시트와 같다. */
+  const sourceFile: ImportSourceFileInput | undefined =
+    source && table ? { bytes: source.bytes, format: source.format, ...(source.format === 'xlsx' && sheetName && { sheetName }) } : undefined;
+
   /** 파일 요약 첫머리. 예: "CSV · 시트 1개", "XLSX · 시트 TC" */
   const formatLabel = source?.format === 'xlsx' ? `XLSX · 시트 ${sheetName}` : 'CSV · 시트 1개';
 
@@ -82,5 +87,6 @@ export function useImportFile(onTableChange: (table: ImportTable | undefined) =>
     sheetNames: source?.sheetNames ?? [],
     sheetName,
     formatLabel,
+    sourceFile,
   };
 }

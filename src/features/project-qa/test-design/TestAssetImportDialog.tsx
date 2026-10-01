@@ -91,7 +91,7 @@ export function TestAssetImportDialog({ open, onClose, projectId, testCases }: T
   const [decisions, setDecisions] = useState<Record<number, TestAssetImportDecision>>({});
   const [filter, setFilter] = useState<RowFilter>('all');
   // 파일이나 시트가 바뀌면 이전 파일의 컬럼 매핑과 판단은 버리고 새 표 기준으로 다시 시작한다.
-  const { fileName, table, notes, fileError, chooseFile, chooseSheet, sheetNames, sheetName, formatLabel } = useImportFile((nextTable) => {
+  const { fileName, table, notes, fileError, chooseFile, chooseSheet, sheetNames, sheetName, formatLabel, sourceFile } = useImportFile((nextTable) => {
     setMapping(nextTable ? suggestColumnMapping(nextTable.headers) : []);
     setDecisions({});
     setFilter('all');
@@ -129,11 +129,12 @@ export function TestAssetImportDialog({ open, onClose, projectId, testCases }: T
   };
 
   const apply = async () => {
-    if (!table) return;
+    // 화면에서 가져오면 원본 파일을 항상 함께 저장한다.
+    if (!table || !sourceFile) return;
     setBusy(true);
     setApplyError('');
     try {
-      setSession(await repositories.testAssetImports.apply({ projectId, fileName, table, mapping, decisions: rowDecisions }));
+      setSession(await repositories.testAssetImports.apply({ projectId, fileName, table, mapping, decisions: rowDecisions, source: sourceFile }));
       setStep('done');
     } catch (error) {
       setApplyError(error instanceof Error ? error.message : 'TC를 가져오지 못했어요.');
