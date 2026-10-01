@@ -110,7 +110,7 @@ export function ResultDashboardTab() {
         {flow}
         <StateMessage
           title="아직 업로드한 수행 결과가 없어요."
-          description="고객사 양식에서 수행을 마친 CSV 파일을 올리면 PASS · FAIL · BLOCKED · 미수행을 플랫폼과 기능별로 요약해요."
+          description="고객사 양식에서 수행을 마친 CSV 또는 XLSX 파일을 올리면 PASS · FAIL · BLOCKED · 미수행을 플랫폼과 기능별로 요약해요."
           action={
             <Button variant="primary" icon={<Upload aria-hidden />} onClick={() => setUploadOpen(true)}>
               수행 결과 파일 업로드
