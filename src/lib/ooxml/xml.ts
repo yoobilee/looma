@@ -9,6 +9,12 @@
 
 export class XmlParseError extends Error {}
 
+/** OOXML 파트에 넉넉하지만 비정상적으로 깊거나 속성이 많은 문서에 시간을 쓰지 않을 만큼의 상한 */
+export const XML_LIMITS = {
+  maxDepth: 128,
+  maxAttributesPerElement: 256,
+};
+
 export interface XmlAttribute {
   name: string;
   /** 엔티티를 풀어 쓴 값 */
@@ -201,6 +207,7 @@ export function parseXml(source: string): XmlElement {
       }
       // 속성 앞에는 공백이 있어야 한다.
       if (index === before) fail(`<${name}>의 속성 사이에 공백이 없어요.`);
+      if (attributes.length >= XML_LIMITS.maxAttributesPerElement) fail(`<${name}>의 속성이 너무 많아요(최대 ${XML_LIMITS.maxAttributesPerElement}개).`);
       const rawStart = index;
       const { name: attrName, end: attrEnd } = readName(index);
       if (!isQName(attrName)) fail(`<${name}>의 속성 이름이 올바르지 않아요.`);
@@ -220,16 +227,20 @@ export function parseXml(source: string): XmlElement {
     }
 
     const parent = stack[stack.length - 1];
-    const namespaces = new Map(parent?.namespaces ?? [['xml', XML_NS]]);
-    for (const attribute of attributes) {
+    if (stack.length >= XML_LIMITS.maxDepth) fail(`요소가 너무 깊게 중첩되어 있어요(최대 ${XML_LIMITS.maxDepth}단계).`);
+    // namespace를 새로 선언한 요소만 지도를 복사한다. 나머지는 부모의 지도를 그대로 쓴다.
+    const declares = attributes.some((attribute) => attribute.name === 'xmlns' || attribute.name.startsWith('xmlns:'));
+    const declared = parent && !declares ? undefined : new Map(parent?.namespaces ?? [['xml', XML_NS]]);
+    const namespaces: ReadonlyMap<string, string> = declared ?? parent!.namespaces;
+    for (const attribute of declares ? attributes : []) {
       if (attribute.name === 'xmlns') {
         if (attribute.value === XML_NS || attribute.value === XMLNS_NS) fail('예약된 namespace를 기본 namespace로 쓸 수 없어요.');
-        namespaces.set('', attribute.value);
+        declared!.set('', attribute.value);
       } else if (attribute.name.startsWith('xmlns:')) {
         const prefix = attribute.name.slice(6);
         if (prefix === 'xmlns' || (prefix === 'xml') !== (attribute.value === XML_NS) || attribute.value === XMLNS_NS) fail(`${attribute.name} 선언이 올바르지 않아요.`);
         if (attribute.value === '') fail(`${attribute.name} 선언 값이 비어 있어요.`);
-        namespaces.set(prefix, attribute.value);
+        declared!.set(prefix, attribute.value);
       }
     }
     const colon = name.indexOf(':');

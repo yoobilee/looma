@@ -1,6 +1,6 @@
 import { strToU8 } from 'fflate';
 import { attribute, attributeNs, childElements, escapeXmlText, isXmlSafeText, parseXml, textContent, XmlParseError, type XmlElement } from './xml';
-import { unzipPackage, zipPackage, ZipPackageError, type ZipPackage } from './zipPackage';
+import { assertPackageContent, unzipPackage, zipPackage, ZipPackageError, type ZipPackage } from './zipPackage';
 
 /*
  * 원본 XLSX 패키지에서 한 워크시트의 "기존 문자열 셀" 값만 바꾼다. 범용 OOXML 편집기가 아니다.
@@ -499,12 +499,14 @@ export function patchWorksheetXml(source: string, layout: XlsxSheetLayout, patch
 
 /**
  * 원본 XLSX bytes에 셀 값을 반영한 새 XLSX bytes를 만든다. 원본 bytes는 바꾸지 않는다.
- * 바꿀 셀이 없으면 원본 bytes를 그대로(복사본으로) 돌려준다.
+ * 실제로 고친 셀이 없으면 원본 bytes를 그대로(복사본으로) 돌려준다. changedCells가 비어 있어도
+ * 계획한 값이 파일에 들어갔다는 뜻은 아니므로, 호출하는 쪽은 결과 bytes를 다시 읽어 확인해야 한다.
  */
 export function patchXlsx(original: Uint8Array, layout: XlsxSheetLayout, patches: XlsxCellPatch[], options: PatchOptions = {}): XlsxPatchResult {
-  if (patches.length === 0) return { ok: true, bytes: original.slice(), changedCells: [] };
   try {
+    // 바꿀 셀이 없어도 원본 패키지가 정상적인 classic ZIP인지 먼저 확인한다(원본을 그대로 내줄 때도 같다).
     const pkg = unzipPackage(original);
+    if (patches.length === 0) return { ok: true, bytes: original.slice(), changedCells: [] };
     const resolved = resolveWorksheet(pkg, layout.sheetName, options);
     const worksheet = readPart(pkg, resolved.worksheetPath, options, XLSX_PART_LIMITS.worksheetBytes);
     let shared: SharedString[] | undefined;
@@ -516,7 +518,11 @@ export function patchXlsx(original: Uint8Array, layout: XlsxSheetLayout, patches
     const encoded = strToU8(xml);
     const entries = new Map(pkg.entries);
     entries.set(resolved.worksheetPath, worksheet.hasBom ? concat(Uint8Array.from(UTF8_BOM), encoded) : encoded);
-    return { ok: true, bytes: zipPackage({ names: pkg.names, entries }), changedCells };
+    const patched = { names: pkg.names, entries };
+    const bytes = zipPackage(patched);
+    // 다시 묶은 파일을 같은 엄격한 reader로 열어, 고친 시트 말고 모든 파트가 원본 내용과 byte 단위로 같은지 확인한다.
+    assertPackageContent(bytes, patched);
+    return { ok: true, bytes, changedCells };
   } catch (error) {
     if (error instanceof PatchProblems) return { ok: false, problems: error.problems };
     if (error instanceof ZipPackageError) return { ok: false, problems: [error.message] };

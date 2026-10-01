@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
-import { parseXml, XmlParseError } from './xml';
+import { parseXml, XML_LIMITS, XmlParseError } from './xml';
 import { columnLetters, patchXlsx, resolveWorksheet, type XlsxCellPatch, type XlsxSheetLayout } from './xlsxPatch';
-import { readCentralDirectory, unzipPackage, ZIP_LIMITS } from './zipPackage';
+import { readZipDirectory, unzipPackage, ZIP_LIMITS } from './zipPackage';
 
 /* ---------- fixture ---------- */
 
@@ -155,6 +155,25 @@ describe('엄격한 XML parser', () => {
       expect(() => parseXml(source)).toThrow(XmlParseError);
     });
   }
+
+  it('하위 요소가 접두사를 다시 선언해도 형제 요소의 namespace는 바뀌지 않는다', () => {
+    const root = parseXml('<a xmlns:p="urn:1"><b xmlns:p="urn:2"><p:c/></b><p:d/></a>');
+    const [b, d] = root.children.filter((child) => child.kind === 'element');
+    const [c] = b.kind === 'element' ? b.children.filter((child) => child.kind === 'element') : [];
+    expect([c, d].map((item) => item.kind === 'element' && item.namespaceUri)).toEqual(['urn:2', 'urn:1']);
+  });
+
+  it(`요소 깊이(${XML_LIMITS.maxDepth}단계) · 요소당 속성 수(${XML_LIMITS.maxAttributesPerElement}개) 상한을 넘으면 바로 거부한다`, () => {
+    const nested = (depth: number) => '<a>'.repeat(depth) + '</a>'.repeat(depth);
+    expect(() => parseXml(nested(XML_LIMITS.maxDepth))).not.toThrow();
+    expect(() => parseXml(nested(XML_LIMITS.maxDepth + 1))).toThrow('너무 깊게 중첩');
+    const withAttributes = (count: number) => `<a ${Array.from({ length: count }, (_, index) => `x${index}="1"`).join(' ')}/>`;
+    expect(() => parseXml(withAttributes(XML_LIMITS.maxAttributesPerElement))).not.toThrow();
+    expect(() => parseXml(withAttributes(XML_LIMITS.maxAttributesPerElement + 1))).toThrow('속성이 너무 많아요');
+    const started = performance.now();
+    expect(() => parseXml(withAttributes(24000))).toThrow('속성이 너무 많아요');
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 /* ---------- 시트 찾기 · 관계 ---------- */
@@ -457,16 +476,16 @@ describe('ZIP 패키지 방어', () => {
 
   it('같은 이름의 항목이 두 번 있으면(대소문자 무시) 거부한다', () => {
     const base = zipSync({ 'xl/one.xml': strToU8('<a/>'), 'xl/two.xml': strToU8('<b/>') });
-    expect(() => readCentralDirectory(renameEntry(base, 'xl/two.xml', 'xl/one.xml'))).toThrow('같은 이름의 항목');
-    expect(() => readCentralDirectory(renameEntry(base, 'xl/two.xml', 'xl/ONE.xml'))).toThrow('같은 이름의 항목');
+    expect(() => readZipDirectory(renameEntry(base, 'xl/two.xml', 'xl/one.xml'))).toThrow('같은 이름의 항목');
+    expect(() => readZipDirectory(renameEntry(base, 'xl/two.xml', 'xl/ONE.xml'))).toThrow('같은 이름의 항목');
     expect(() => unzipPackage(renameEntry(base, 'xl/two.xml', 'xl/one.xml'))).toThrow('같은 이름의 항목');
   });
 
   it('__proto__ · .. · 역슬래시 같은 이름의 항목은 거부한다', () => {
     const base = zipSync({ 'xl/abcdefghi': strToU8('x'), 'a/bb/c.xml': strToU8('y') });
-    expect(() => readCentralDirectory(renameEntry(base, 'xl/abcdefghi', 'xl/__proto__'))).toThrow('지원하지 않는 항목 이름');
-    expect(() => readCentralDirectory(renameEntry(base, 'a/bb/c.xml', 'a/../c.xml'))).toThrow('지원하지 않는 항목 이름');
-    expect(() => readCentralDirectory(renameEntry(base, 'a/bb/c.xml', '/a/b/c.xml'))).toThrow('지원하지 않는 항목 이름');
-    expect(() => readCentralDirectory(zipSync({ 'q\\.xml': strToU8('z') }))).toThrow('지원하지 않는 항목 이름');
+    expect(() => readZipDirectory(renameEntry(base, 'xl/abcdefghi', 'xl/__proto__'))).toThrow('지원하지 않는 항목 이름');
+    expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'a/../c.xml'))).toThrow('지원하지 않는 항목 이름');
+    expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', '/a/b/c.xml'))).toThrow('지원하지 않는 항목 이름');
+    expect(() => readZipDirectory(zipSync({ 'q\\.xml': strToU8('z') }))).toThrow('지원하지 않는 항목 이름');
   });
 });

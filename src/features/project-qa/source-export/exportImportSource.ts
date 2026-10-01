@@ -8,7 +8,7 @@ import { openXlsxWorkbook } from '../imports/xlsxSheet';
 /*
  * 원본 형식 내보내기 실행. 브라우저 로컬 저장소에 보관한 원본 XLSX bytes에 계획한 셀 값만 반영해 새 파일을 만든다.
  * 원본 bytes · 저장소는 바꾸지 않는다. SheetJS로 다시 쓰지 않으며, 원본이 없으면 다른 방식으로 대신 만들지 않는다.
- * 만든 파일은 가져오기와 같은 reader로 다시 읽어 확인한 뒤에만 돌려준다.
+ * 내려줄 파일은 바꾼 셀이 없어도 항상 가져오기와 같은 reader로 다시 읽어 확인한 뒤에만 돌려준다.
  */
 
 export type SourceExportOutcome =
@@ -54,17 +54,17 @@ async function build(plan: SourceExportPlan, options: SourceExportOptions): Prom
   );
   if (!result.ok) return result;
 
-  // 바꾼 파일은 가져오기와 같은 reader로 다시 읽어 실제 결과를 확인한다. 하나라도 다르면 파일을 내려주지 않는다.
-  if (result.changedCells.length > 0) {
-    let problems: string[];
-    try {
-      const workbook = await openXlsxWorkbook(result.bytes.slice().buffer);
-      problems = verifySourceExportOutput(plan, toImportTable(workbook.readSheet(plan.layout.sheetName).records));
-    } catch {
-      problems = ['내보낸 파일을 다시 읽을 수 없어요.'];
-    }
-    if (problems.length > 0) return { ok: false, problems: ['내보낸 파일을 다시 읽어 확인했더니 기대와 달라 내려주지 않았어요.', ...problems] };
+  // 내려줄 bytes는 항상 가져오기와 같은 reader로 다시 읽어 실제 결과를 확인한다. 하나라도 다르면 파일을 내려주지 않는다.
+  // 실제로 고친 셀 수(changedCells)로 확인을 건너뛰지 않는다. 계획한 변경이 있어도 patcher가 원본과 같다고 보고
+  // 셀을 고치지 않을 수 있고(예: 단독 CR), 그때 원본 bytes를 그대로 내주면 계획한 값이 파일에 없다.
+  let problems: string[];
+  try {
+    const workbook = await openXlsxWorkbook(result.bytes.slice().buffer);
+    problems = verifySourceExportOutput(plan, toImportTable(workbook.readSheet(plan.layout.sheetName).records));
+  } catch {
+    problems = ['내보낸 파일을 다시 읽을 수 없어요.'];
   }
+  if (problems.length > 0) return { ok: false, problems: ['내보낸 파일을 다시 읽어 확인했더니 기대와 달라 내려주지 않았어요.', ...problems] };
   return { ok: true, fileName: sourceExportFileName(plan.fileName), bytes: result.bytes, changedCells: result.changedCells, notices: plan.notices };
 }
 
