@@ -1,0 +1,10 @@
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+
+.more {
+  display: flex;
+  max-width: 720px;
+}
