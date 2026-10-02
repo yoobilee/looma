@@ -62,6 +62,34 @@ export function SelectField({ label, hint, hideLabel, className, children, ...re
   );
 }
 
+interface RadioGroupProps<T extends string> {
+  legend: string;
+  name: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (next: T) => void;
+}
+
+/** 하나만 고르는 칩. 네이티브 radio라 화살표 키로 옮겨 다닐 수 있다. */
+export function RadioGroup<T extends string>({ legend, name, options, value, onChange }: RadioGroupProps<T>) {
+  return (
+    <fieldset className={styles.fieldset}>
+      <legend className={styles.label}>{legend}</legend>
+      <div className={styles.chips}>
+        {options.map((option) => {
+          const checked = option.value === value;
+          return (
+            <label key={option.value} className={`${styles.chip} ${checked ? styles.chipChecked : ''}`}>
+              <input type="radio" className="visually-hidden" name={name} value={option.value} checked={checked} onChange={() => onChange(option.value)} />
+              {option.label}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 interface CheckboxGroupProps<T extends string> {
   legend: string;
   options: { value: T; label: string }[];

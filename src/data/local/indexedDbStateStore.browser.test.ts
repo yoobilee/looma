@@ -4,6 +4,7 @@ import { analyzeResultImport, defaultResultDecisionFor, suggestResultColumnMappi
 import { parseCsv } from '@/lib/csv';
 import { PersistenceError } from '../persistenceError';
 import type { Repositories } from '../repositories/types';
+import { importQaRound, legacyV1State, QA_TEST_CASE_ID, qaScenarioSeed } from '../mock/issueScenario';
 import { createSeed, PROJECT_A } from '../mock/seed';
 import { CURRENT_SCHEMA_VERSION, type AppData, type StoredAppState } from './appData';
 import { openIndexedDbStateStore } from './indexedDbStateStore';
@@ -423,5 +424,77 @@ describe('가져오기 원자성 (저장소 + 실제 IndexedDB)', () => {
     expect(after.artifacts.size).toBe(0);
     expect(after.state.revision).toBe(before.state.revision + 1);
     expect(after.state.data.importSourceArtifacts).toEqual([]);
+  });
+});
+
+/* ---------- v1 → v2 변환(이슈 · 확인사항) + 실제 IndexedDB ---------- */
+
+describe('v1 저장 데이터 변환 (실제 IndexedDB)', () => {
+  /** 이전 버전 앱이 저장해 둔 v1 상태를 실제 IndexedDB에 그대로 넣는다. */
+  async function seedLegacy(factory: IDBFactory, revision = 7) {
+    const store = await openIndexedDbStateStore(factory);
+    await store.initialize(legacyV1State(revision));
+  }
+
+  it('v1 데이터를 열면 한 번 변환해 v2로 저장하고, 새 연결로 다시 열어도(새로고침) 그대로이며 다시 변환하지 않는다', async () => {
+    const { factory, name } = isolatedFactory();
+    await seedLegacy(factory, 7);
+    const before = await inspectDatabase(name);
+    expect(before.state).toMatchObject({ schemaVersion: 1, revision: 7 });
+
+    const tab = await openTab(factory);
+    const migrated = await inspectDatabase(name);
+    expect(migrated.state).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 8 });
+    expect(migrated.state.data.results.some((result) => 'issueId' in result)).toBe(false);
+    expect(migrated.state.data.issues.find((issue) => issue.id === 'issue-bug-014')).toMatchObject({ status: 'open', resultId: 'imp-a-2-SIGN-002-ios', updatedAt: expect.any(String) });
+    expect(migrated.state.data.issues.find((issue) => issue.id === 'issue-q-push')).toMatchObject({ status: 'resolved' });
+    expect(await tab.issues.listByProject(PROJECT_A)).toHaveLength(before.state.data.issues.length);
+
+    const reopened = await openTab(factory);
+    expect(await inspectDatabase(name)).toEqual(migrated);
+    expect(await reopened.issues.listByProject(PROJECT_A)).toEqual(await tab.issues.listByProject(PROJECT_A));
+  });
+
+  it('변환할 수 없는 v1 데이터는 막고 IndexedDB의 v1 데이터를 바꾸지 않는다', async () => {
+    const { factory, name } = isolatedFactory();
+    const legacy = legacyV1State(3);
+    (legacy.data as { issues: Record<string, unknown>[] }).issues[0].status = 'unknown';
+    await (await openIndexedDbStateStore(factory)).initialize(legacy);
+    const before = await inspectDatabase(name);
+
+    const repos = createLocalRepositories({ openStore: () => openIndexedDbStateStore(factory) });
+    await repos.persistence.load();
+    expect(repos.persistence.getStatus()).toMatchObject({ state: 'blocked', reason: 'migration_failed' });
+    expect(await inspectDatabase(name)).toEqual(before);
+  });
+
+  it('이슈 생성 · 상태 변경은 새로고침 뒤에도 남고, 3차 PASS가 생겨도 자동으로 해결되지 않는다', async () => {
+    const { factory, name } = isolatedFactory();
+    const tab = await openTab(factory, { createInitialData: qaScenarioSeed });
+    await importQaRound(tab, 1, 'P');
+    const second = await importQaRound(tab, 2, 'F');
+    const issue = await tab.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'Android 로그인 실패', resultId: second.result.id });
+    await importQaRound(tab, 3, 'P');
+
+    const reopened = await openTab(factory);
+    expect(await reopened.issues.get(issue.id)).toEqual(issue);
+    expect(issue).toMatchObject({ status: 'open', resultId: second.result.id, testCaseId: QA_TEST_CASE_ID });
+
+    const resolved = await reopened.issues.updateStatus(issue.id, 'resolved');
+    const saved = await inspectDatabase(name);
+    expect(saved.state.data.issues.find((item) => item.id === issue.id)).toEqual(resolved);
+    expect(await (await openTab(factory)).issues.get(issue.id)).toEqual(resolved);
+  });
+
+  it('이슈 저장도 오래된 revision이면 conflict로 거부하고 IndexedDB를 바꾸지 않는다', async () => {
+    const { factory, name } = isolatedFactory();
+    const tabA = await openTab(factory);
+    const tabB = await openTab(factory);
+    await tabA.issues.create({ projectId: PROJECT_A, type: 'question', title: 'A 탭 확인사항' });
+    const stored = await inspectDatabase(name);
+
+    await expectPersistenceError(tabB.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'B 탭 이슈' }), 'conflict');
+    await expectPersistenceError(tabB.issues.updateStatus('issue-bug-014', 'resolved'), 'conflict');
+    expect(await inspectDatabase(name)).toEqual(stored);
   });
 });

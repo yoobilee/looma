@@ -286,13 +286,8 @@
   color: var(--color-muted);
 }
 
-.issueLink {
-  color: var(--color-sky-strong);
-  font-weight: 700;
-}
-
-.issueLink:hover {
-  text-decoration: underline;
+.retestIssues {
+  margin-top: 6px;
 }
 
 .retestResults {

@@ -24,6 +24,15 @@ const displayOrder: ResultChangeType[] = [
 const rankOf = new Map(displayOrder.map((type, index) => [type, index]));
 
 /**
+ * 이슈 · 확인사항을 만들 수 있는 변화. 확인 우선도가 높은 실패 · 차단 변화만이며, 비교 차수의 실제 결과(currentResultId)에 연결한다.
+ * 비교 행 자체는 저장하지 않는다. 범위 추가 · 제외 등은 결과 화면의 재수행 목록에서 만들 수 있다.
+ */
+export const issueActionChangeTypes: readonly ResultChangeType[] = ['newly_failed', 'still_failed', 'newly_blocked'];
+
+export const canCreateIssueFrom = (row: Pick<ResultComparisonRow, 'changeType' | 'currentResultId'>): row is Pick<ResultComparisonRow, 'changeType'> & { currentResultId: string } =>
+  issueActionChangeTypes.includes(row.changeType) && !!row.currentResultId;
+
+/**
  * 비교할 두 차수. 고른 차수(주소의 base · target)가 둘 다 있고 서로 다르면 그 차수이고,
  * 없거나 지워졌거나 같으면 차수 번호가 가장 큰 두 차수(자동 선택)다.
  * 따로 저장하지 않고 매번 계산하므로 새 차수를 가져오거나 주소가 바뀌면 바로 따라간다.

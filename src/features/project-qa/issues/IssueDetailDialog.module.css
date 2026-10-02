@@ -1,23 +1,25 @@
-.form {
+.layout {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
-.row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  /* 한쪽에만 안내 문구가 있어도 입력 칸 높이를 맞춘다. */
-  align-items: start;
-  gap: 12px;
-}
-
-.source {
+.links {
   display: grid;
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-panel);
   background: var(--surface-soft);
+}
+
+.heading {
+  font: var(--text-body-strong);
+}
+
+.subheading {
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
 }
 
 .facts {
@@ -41,6 +43,17 @@
   grid-column: 1 / -1;
 }
 
+.link {
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--color-line-strong);
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
 .tcId {
   font-weight: 700;
   color: var(--color-sky-strong);
@@ -51,24 +64,56 @@
   color: var(--color-muted);
 }
 
-.linked {
+.later {
   display: grid;
-  gap: 4px;
-  padding-top: 10px;
+  gap: 8px;
+  padding-top: 12px;
   border-top: 1px solid var(--color-line);
+}
+
+.timeline {
+  display: grid;
+  gap: 6px;
+}
+
+.timeline li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.timeline .link {
+  font-weight: 700;
+}
+
+.caption {
   font: var(--text-caption);
   color: var(--color-muted);
 }
 
-.linked ul {
+.form {
   display: grid;
-  gap: 2px;
+  gap: 16px;
 }
 
-.linked a {
-  color: var(--color-sky-strong);
-  font-weight: 700;
-  overflow-wrap: anywhere;
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 한쪽에만 안내 문구가 있어도 입력 칸 높이를 맞춘다. */
+  align-items: start;
+  gap: 12px;
+}
+
+.times {
+  font: var(--text-caption);
+  color: var(--color-muted);
 }
 
 .error {

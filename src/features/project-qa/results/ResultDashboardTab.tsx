@@ -14,14 +14,18 @@ import {
 } from '@/domain/resultSummary';
 import { summarizeResultImport } from '@/domain/testResultImport';
 import { executionTypeLabel, platformLabel, testResultLabel, testResultOrder } from '@/domain/labels';
-import type { TestResult, TestResultImport } from '@/domain/types';
+import type { IssueType, TestResult, TestResultImport } from '@/domain/types';
 import { formatMonthDay } from '@/lib/date';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { ResultTag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
+import { IssueCreateDialog } from '../issues/IssueCreateDialog';
+import { issuesByResult } from '../issues/issueView';
+import { ResultIssueAction } from '../issues/ResultIssueAction';
 import { useProjectContext } from '../projectContext';
+import { canCreateIssueFrom } from './comparisonView';
 import { ResultLegend, ResultStackedBar } from './ResultStackedBar';
 import { ResultComparisonView } from './ResultComparisonView';
 import { ResultImportDialog } from './ResultImportDialog';
@@ -45,7 +49,8 @@ function groupRetests(results: TestResult[]) {
     title: items[0].title,
     feature: items[0].feature,
     items: results.filter((result) => retestKey(result) === key),
-    issueId: items.find((item) => item.issueId)?.issueId,
+    /** 이슈 · 확인사항을 만들 수 있는 결과(FAIL · BLOCKED) */
+    issueSources: items,
     note: items.find((item) => item.note)?.note,
   }));
 }
@@ -61,6 +66,8 @@ export function ResultDashboardTab() {
   const [selectedImportId, setSelectedImportId] = useState<string | null>(searchParams.get('import'));
   const [uploadOpen, setUploadOpen] = useState(false);
   const [showAllRetests, setShowAllRetests] = useState(false);
+  // 이슈 · 확인사항을 만들 결과. 사용자가 행에서 직접 고른 경우에만 연다(자동으로 만들지 않는다).
+  const [issueSources, setIssueSources] = useState<TestResult[] | null>(null);
 
   const data = useRepositoryData(
     async (repos) => {
@@ -80,6 +87,24 @@ export function ResultDashboardTab() {
 
   const { imports, resultsByImport, issues, template, testCases } = data.data;
   const flowCurrent = imports.length > 0 ? 4 : 1;
+  const linkedIssues = issuesByResult(issues);
+  const linkedTo = (resultIds: string[]) => resultIds.flatMap((id) => linkedIssues.get(id) ?? []);
+  const resultById = new Map(Object.values(resultsByImport).flat().map((result) => [result.id, result]));
+  // BLOCKED만 있으면 확인사항, FAIL이 있으면 이슈로 시작한다. 사용자가 대화상자에서 바꿀 수 있다.
+  const issueTypeFor = (sources: TestResult[]): IssueType => (sources.every((result) => result.result === 'blocked') ? 'question' : 'defect');
+
+  const issueDialog = issueSources && (
+    <IssueCreateDialog
+      open
+      projectId={project.id}
+      initialType={issueTypeFor(issueSources)}
+      testCases={testCases}
+      sourceResults={issueSources}
+      imports={imports}
+      existingIssues={issues}
+      onClose={() => setIssueSources(null)}
+    />
+  );
 
   const flow = (
     <ol className={styles.flow} aria-label="수행 결과 흐름">
@@ -144,8 +169,15 @@ export function ResultDashboardTab() {
           previousId={searchParams.get('base')}
           currentId={searchParams.get('target')}
           onSelectionChange={(base, target) => setSearchParams({ view: 'compare', base, target }, { replace: true })}
+          renderIssueAction={(row, view) => {
+            const source = canCreateIssueFrom(row) ? resultById.get(row.currentResultId) : undefined;
+            if (!source) return null;
+            const target = [view.externalId ?? view.title, row.platform && platformLabel[row.platform]].filter(Boolean).join(' ');
+            return <ResultIssueAction projectId={project.id} linked={linkedTo([source.id])} target={target} onCreate={() => setIssueSources([source])} />;
+          }}
         />
         {uploadDialog}
+        {issueDialog}
       </div>
     );
   }
@@ -161,7 +193,6 @@ export function ResultDashboardTab() {
   const features = groupByFeature(results);
   const focus = attentionAreas(results);
   const retests = groupRetests(results);
-  const issueById = Object.fromEntries(issues.map((issue) => [issue.id, issue]));
   const visibleRetests = showAllRetests ? retests : retests.slice(0, 6);
 
   return (
@@ -309,7 +340,6 @@ export function ResultDashboardTab() {
           <SectionHeader id="retest-title" title="재수행 필요" meta={`${retests.length}건 · FAIL / BLOCKED`} metaTone="coral" />
           <ul className={styles.retests}>
             {visibleRetests.map((retest) => {
-              const issue = retest.issueId ? issueById[retest.issueId] : undefined;
               return (
                 <li key={retest.key} className={styles.retest}>
                   <div className={styles.retestMain}>
@@ -321,15 +351,15 @@ export function ResultDashboardTab() {
                       {retest.feature}
                       {!retest.linked && ' · 미연결'}
                       {retest.note && ` · ${retest.note}`}
-                      {issue && (
-                        <>
-                          {' · '}
-                          <Link to={`/projects/${project.id}/issues`} className={styles.issueLink}>
-                            {issue.externalKey ?? '연결 이슈'}
-                          </Link>
-                        </>
-                      )}
                     </p>
+                    <div className={styles.retestIssues}>
+                      <ResultIssueAction
+                        projectId={project.id}
+                        linked={linkedTo(retest.items.map((item) => item.id))}
+                        target={retest.externalId ?? retest.title}
+                        onCreate={() => setIssueSources(retest.issueSources)}
+                      />
+                    </div>
                   </div>
                   <div className={styles.retestResults}>
                     {retest.items.map((item) => (
@@ -402,6 +432,7 @@ export function ResultDashboardTab() {
 
       <p className={styles.footnote}>실제 검증은 고객사 양식에서 수동으로 수행하고, Looma는 결과와 이슈·근거를 빠르게 정리하는 데 집중합니다.</p>
       {uploadDialog}
+      {issueDialog}
     </div>
   );
 }

@@ -188,7 +188,7 @@ describe('저장소 변경은 모두 저장된다', () => {
     const [testCase] = await repos.testCases.listByProject(PROJECT_A);
     await step(() => repos.testCases.updateStatus(testCase.id, 'reviewed'));
     const issue = await step(() => repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: '저장 확인 이슈' }));
-    await step(() => repos.issues.updateStatus(issue.id, 'closed'));
+    await step(() => repos.issues.updateStatus(issue.id, 'resolved'));
     const term = await step(() => repos.knowledge.create({ term: '회귀', explanation: '설명' }));
     await step(() => repos.knowledge.update(term.id, { explanation: '바뀐 설명' }));
     const scratch = await step(() => repos.scratch.create({ type: 'text', content: '임시 메모' }));
@@ -206,7 +206,7 @@ describe('저장소 변경은 모두 저장된다', () => {
     expect((await reloaded.deliverables.listByProject(project.id)).map((item) => item.id)).toEqual([deliverable.id]);
     expect(await reloaded.templates.get(template.id)).toBeDefined();
     expect((await reloaded.testCases.listByProject(PROJECT_A)).find((item) => item.id === testCase.id)).toMatchObject({ status: 'reviewed' });
-    expect((await reloaded.issues.listByProject(PROJECT_A)).find((item) => item.id === issue.id)).toMatchObject({ status: 'closed' });
+    expect((await reloaded.issues.listByProject(PROJECT_A)).find((item) => item.id === issue.id)).toMatchObject({ status: 'resolved' });
     expect(await reloaded.knowledge.get(term.id)).toMatchObject({ explanation: '바뀐 설명' });
     const scratchAfter = await reloaded.scratch.list();
     expect(scratchAfter.find((item) => item.id === scratch.id)).toMatchObject({ linkedType: 'record' });
@@ -257,7 +257,7 @@ describe('저장 실패', () => {
   it('검증에 실패한 변경은 저장소에 쓰지 않는다', async () => {
     const store = createMemoryStateStore();
     const repos = await openTab(store);
-    await expect(repos.issues.updateStatus('issue-missing', 'closed')).rejects.toThrow('이슈을(를) 찾을 수 없어요');
+    await expect(repos.issues.updateStatus('issue-missing', 'resolved')).rejects.toThrow('이슈을(를) 찾을 수 없어요');
     expect((await storedState(store)).revision).toBe(1);
   });
 
@@ -334,10 +334,12 @@ describe('여러 탭', () => {
 /* ---------- schema version ---------- */
 
 describe('schema version', () => {
+  // 변환 경로를 바꿔 끼우는 테스트용 이전 버전 상태. 데이터 모양은 변환 함수가 정한다.
   const v1 = (): StoredAppState => ({ schemaVersion: 1, revision: 4, savedAt: '2026-10-01T00:00:00.000Z', data: createSeed() });
+  const current = (): StoredAppState => ({ ...v1(), schemaVersion: CURRENT_SCHEMA_VERSION });
 
   it('현재 버전은 그대로 읽는다', async () => {
-    const repos = await openTab(createMemoryStateStore(v1()));
+    const repos = await openTab(createMemoryStateStore(current()));
     expect(ready(repos).revision).toBe(4);
   });
 
@@ -351,7 +353,7 @@ describe('schema version', () => {
   });
 
   it('모양이 맞지 않는 데이터는 corrupt로 막고 지우지 않는다', async () => {
-    const store = createMemoryStateStore({ schemaVersion: 1, revision: 2, savedAt: 'x', data: { tasks: 'broken' } });
+    const store = createMemoryStateStore({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 2, savedAt: 'x', data: { tasks: 'broken' } });
     const repos = await openTab(store);
     expect(repos.persistence.getStatus()).toMatchObject({ state: 'blocked', reason: 'corrupt' });
     expect((await storedState(store)).data).toEqual({ tasks: 'broken' });
@@ -396,7 +398,7 @@ describe('schema version', () => {
     expect(repos.persistence.getStatus()).toMatchObject({ state: 'blocked' });
     await repos.persistence.resetToSeed();
     expect(ready(repos)).toMatchObject({ state: 'ready', mode: 'local', revision: 5 });
-    expect(await storedState(store)).toMatchObject({ schemaVersion: 1, revision: 5 });
+    expect(await storedState(store)).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 5 });
   });
 
   it('migration은 저장된 버전부터 한 단계씩 실행하고, 경로가 없거나 실패하면 결과만 알린다', () => {
@@ -585,7 +587,7 @@ describe('원본 파일 읽기 오류', () => {
     await expect((await openTab(withoutBytes)).importSources.getBytes(session.artifactId!)).rejects.toMatchObject({ kind: 'artifact_missing' });
 
     const resized = createMemoryStateStore(stored);
-    await resized.commit({ expectedRevision: stored.revision, schemaVersion: 1, savedAt: 'x', data: stored.data, artifacts: [{ id: session.artifactId!, bytes: new Blob(['다른 크기의 파일']) }] });
+    await resized.commit({ expectedRevision: stored.revision, schemaVersion: CURRENT_SCHEMA_VERSION, savedAt: 'x', data: stored.data, artifacts: [{ id: session.artifactId!, bytes: new Blob(['다른 크기의 파일']) }] });
     await expect((await openTab(resized)).importSources.getBytes(session.artifactId!)).rejects.toMatchObject({ kind: 'artifact_corrupt' });
   });
 

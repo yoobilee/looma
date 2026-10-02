@@ -30,6 +30,7 @@ import type {
   TestResultImport,
   TestScope,
 } from '@/domain/types';
+import type { IssueChanges } from '@/domain/issues';
 import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/domain/testAssetImport';
 import type { ResultColumnMapping, ResultCycleInput, ResultImportRowDecision, ResultValueDecision } from '@/domain/testResultImport';
 
@@ -208,15 +209,34 @@ export interface CreateIssueInput {
   projectId: string;
   type: IssueType;
   title: string;
+  description?: string;
   feature?: string;
+  /** 결과 없이 TC만 연결할 때. resultId가 있으면 결과의 TC를 쓰고, 이 값이 결과의 TC와 다르면 거부한다. */
   testCaseId?: string;
+  /** 이 항목을 만든 수행 결과. 같은 결과에 여러 항목을 만들 수 있다. */
+  resultId?: string;
   requirementId?: string;
+  expected?: string;
+  actual?: string;
+  reproduction?: string;
   note?: string;
 }
 
+/** 고칠 수 있는 값. 연결(프로젝트 · TC · 결과 · 요구사항)은 만든 뒤 바꾸지 않는다. */
+export type UpdateIssueInput = IssueChanges;
+
+/**
+ * 이슈 · 확인사항. 삭제는 없다(과거 QA 판단 기록을 남긴다. 필요 없으면 보류로 둔다).
+ * 결과 · TC는 읽기만 하고 바꾸지 않으며, 이후 수행 결과로 상태를 자동으로 바꾸지 않는다.
+ */
 export interface IssueRepository {
+  /** 최근 생성 순 */
   listByProject(projectId: string): Promise<Issue[]>;
+  get(id: string): Promise<Issue | undefined>;
+  /** 확인 필요(open)로 만든다. 결과 · TC · 요구사항이 이 프로젝트에 없으면 거부한다. */
   create(input: CreateIssueInput): Promise<Issue>;
+  /** 바뀐 것이 없으면 저장하지 않는다. 상태가 바뀔 때만 활동을 남긴다. */
+  update(id: string, changes: UpdateIssueInput): Promise<Issue>;
   updateStatus(id: string, status: IssueStatus): Promise<Issue>;
 }
 

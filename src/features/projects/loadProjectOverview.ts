@@ -37,7 +37,7 @@ export async function loadProjectOverview(repos: Repositories, project: Project)
     latestImport,
     latestCounts,
     executionRate: latestCounts ? executionRate(latestCounts) : undefined,
-    openIssueCount: issues.filter((issue) => issue.type === 'defect' && issue.status !== 'closed').length,
-    openQuestionCount: issues.filter((issue) => issue.type === 'question' && issue.status !== 'answered').length,
+    openIssueCount: issues.filter((issue) => issue.type === 'defect' && issue.status === 'open').length,
+    openQuestionCount: issues.filter((issue) => issue.type === 'question' && issue.status === 'open').length,
   };
 }

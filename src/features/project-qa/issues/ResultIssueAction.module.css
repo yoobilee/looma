@@ -1,0 +1,17 @@
+.action {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.link {
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-sky-strong);
+  white-space: nowrap;
+}
+
+.link:hover {
+  text-decoration: underline;
+}

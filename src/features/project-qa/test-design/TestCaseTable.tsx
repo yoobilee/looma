@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { repositories } from '@/data';
 import { generationTypeLabel, testCaseStatusLabel, testPerspectiveLabel } from '@/domain/labels';
@@ -9,6 +9,8 @@ import styles from './TestCaseTable.module.css';
 interface TestCaseTableProps {
   testCases: TestCase[];
   deliverables: Deliverable[];
+  /** 처음 펼쳐 보여 줄 TC(다른 화면의 링크로 들어온 경우). 그 행으로 스크롤하고 초점을 옮긴다. */
+  initialExpandedId?: string;
 }
 
 function sourceLabel(testCase: TestCase, deliverables: Deliverable[]): string {
@@ -74,11 +76,19 @@ function StatusActions({ testCase }: { testCase: TestCase }) {
 }
 
 /** TC 초안 표. 행을 펼치면 사전 조건·절차·기대 결과와 검토 동작이 보인다. */
-export function TestCaseTable({ testCases, deliverables }: TestCaseTableProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+export function TestCaseTable({ testCases, deliverables, initialExpandedId }: TestCaseTableProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!initialExpandedId) return;
+    const button = scrollerRef.current?.querySelector<HTMLElement>(`[aria-controls="tc-detail-${CSS.escape(initialExpandedId)}"]`);
+    button?.scrollIntoView({ block: 'center' });
+    button?.focus({ preventScroll: true });
+  }, [initialExpandedId]);
 
   return (
-    <div className={styles.scroller} role="region" aria-label="TC 초안 표" tabIndex={0}>
+    <div ref={scrollerRef} className={styles.scroller} role="region" aria-label="TC 초안 표" tabIndex={0}>
       <table className={styles.table}>
         <thead>
           <tr>

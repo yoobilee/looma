@@ -677,10 +677,10 @@ export function createSeed() {
   override('imp-a-2', 'SIGN-001', 'android', 'pass');
   override('imp-a-2', 'SIGN-001', 'ios', 'pass');
   override('imp-a-2', 'SIGN-002', 'android', 'pass');
-  override('imp-a-2', 'SIGN-002', 'ios', 'fail', { issueId: 'issue-bug-014', note: 'iOS 문구 상이' });
+  override('imp-a-2', 'SIGN-002', 'ios', 'fail', { note: 'iOS 문구 상이' });
   override('imp-a-2', 'LOGIN-018', 'android', 'blocked', { note: '기획 확인 대기' });
   override('imp-a-2', 'LOGIN-018', 'ios', 'blocked', { note: '기획 확인 대기' });
-  override('imp-a-2', 'LOGIN-019', 'android', 'fail', { issueId: 'issue-bug-015' });
+  override('imp-a-2', 'LOGIN-019', 'android', 'fail');
   override('imp-a-2', 'LOGIN-019', 'ios', 'not_tested');
 
   const issues: Issue[] = [
@@ -693,9 +693,13 @@ export function createSeed() {
       status: 'open',
       feature: '회원가입',
       testCaseId: 'tc-002',
+      resultId: 'imp-a-2-SIGN-002-ios',
+      expected: '가입 진행 가능',
+      actual: '비밀번호 오류 문구가 기획서 p.14와 다르게 노출',
       sourceRef: { deliverableId: 'dlv-plan-pdf', locator: 'p.14' },
       note: '재현됨',
       createdAt: at(-1, 17, 0),
+      updatedAt: at(-1, 17, 0),
     },
     {
       id: 'issue-bug-015',
@@ -706,9 +710,11 @@ export function createSeed() {
       status: 'open',
       feature: '로그인',
       testCaseId: 'tc-011',
+      resultId: 'imp-a-2-LOGIN-019-android',
       sourceRef: { deliverableId: 'dlv-plan-pdf', locator: 'p.21' },
       note: '기획 확인 중',
       createdAt: at(-1, 17, 20),
+      updatedAt: at(-1, 17, 20),
     },
     {
       id: 'issue-bug-011',
@@ -716,59 +722,66 @@ export function createSeed() {
       type: 'defect',
       externalKey: 'BUG-011',
       title: '회원가입 완료 후 홈 이동 정상',
-      status: 'closed',
+      status: 'resolved',
       feature: '회원가입',
       testCaseId: 'tc-001',
       note: '재수행 PASS',
       createdAt: at(-3, 15, 0),
+      updatedAt: at(-3, 15, 0),
+      resolvedAt: at(-3, 15, 0),
     },
     {
       id: 'issue-q-login-limit',
       projectId: PROJECT_A,
       type: 'question',
       title: '로그인 실패 횟수 제한',
-      status: 'waiting',
+      status: 'open',
       feature: '로그인',
       testCaseId: 'tc-010',
       requirementId: 'req-008',
       sourceRef: { deliverableId: 'dlv-plan-pdf', locator: 'p.21' },
       note: '기획 미정',
       createdAt: at(-1, 12, 0),
+      updatedAt: at(-1, 12, 0),
     },
     {
       id: 'issue-q-lock-policy',
       projectId: PROJECT_A,
       type: 'question',
       title: '계정 잠금 정책',
-      status: 'waiting',
+      status: 'open',
       feature: '로그인',
       requirementId: 'req-009',
       sourceRef: { deliverableId: 'dlv-plan-pdf', locator: 'p.21' },
       note: '기획 미정',
       createdAt: at(-1, 12, 5),
+      updatedAt: at(-1, 12, 5),
     },
     {
       id: 'issue-q-terms',
       projectId: PROJECT_A,
       type: 'question',
       title: '약관 재동의 조건',
-      status: 'checking',
+      status: 'open',
       feature: '회원가입',
       testCaseId: 'tc-007',
       requirementId: 'req-004',
       sourceRef: { deliverableId: 'dlv-figma-auth', locator: '회원가입 Frame' },
       note: 'Figma와 기획서 불일치',
       createdAt: at(-1, 12, 10),
+      updatedAt: at(-1, 12, 10),
     },
     {
       id: 'issue-q-push',
       projectId: PROJECT_A,
       type: 'question',
       title: '푸시 알림 기본값',
-      status: 'answered',
+      status: 'resolved',
       feature: '마이페이지',
       note: '산출물 명시 없음 → 기본 켜짐으로 답변 받음',
       createdAt: at(-2, 12, 0),
+      updatedAt: at(-2, 12, 0),
+      resolvedAt: at(-2, 12, 0),
     },
   ];
 

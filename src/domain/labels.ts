@@ -224,21 +224,15 @@ export const resultChangeTypeLabel: Record<ResultChangeType, string> = {
 };
 
 export const issueTypeLabel: Record<IssueType, string> = {
-  defect: '결함',
+  defect: '이슈',
   question: '확인사항',
 };
 
 export const issueStatusLabel: Record<IssueStatus, string> = {
-  open: '확인 중',
-  fixed: '수정됨',
-  closed: '종료',
-  waiting: '질문 대기',
-  checking: '답변 확인 중',
-  answered: '확인 완료',
+  open: '확인 필요',
+  resolved: '해결됨',
+  deferred: '보류',
 };
-
-export const defectStatuses: IssueStatus[] = ['open', 'fixed', 'closed'];
-export const questionStatuses: IssueStatus[] = ['waiting', 'checking', 'answered'];
 
 export const scratchTypeLabel: Record<ScratchType, string> = {
   text: '텍스트',
@@ -267,6 +261,8 @@ export const activityTypeLabel: Record<ActivityType, string> = {
   test_case_changed: 'TC 변경',
   results_uploaded: '수행 결과 업로드',
   issue_created: '이슈 등록',
+  issue_updated: '이슈 상태 변경',
+  issue_resolved: '이슈 해결',
   project_changed: '프로젝트 변경',
   knowledge_saved: '업무 지식',
   changes_applied: '변경사항 반영',

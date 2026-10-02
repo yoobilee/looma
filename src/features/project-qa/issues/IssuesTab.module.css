@@ -1,153 +1,158 @@
-.layout {
+.page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 56px;
-  align-items: start;
+  /* 필터 막대 · 긴 TC ID가 열 너비를 넓히지 않게 한다(좁은 화면 가로 넘침 방지). */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
 }
 
-.list {
-  display: grid;
-  gap: 10px;
-}
-
-.item {
-  display: grid;
-  gap: 6px;
-  padding: 20px 22px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-}
-
-.closed {
-  background: transparent;
-}
-
-.closed .title {
-  color: var(--color-muted);
-}
-
-.itemHead {
+.toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 12px 20px;
 }
 
-.key {
-  font: var(--text-caption);
-  font-weight: 800;
-  color: var(--color-sky-strong);
+.filters {
+  /* 필터 막대는 좁은 화면에서 자기 안에서만 가로로 스크롤한다(페이지를 넓히지 않는다). */
+  min-width: 0;
+  max-width: 100%;
 }
 
-.title {
-  font: var(--text-body-strong);
-}
-
-.links {
-  font: var(--text-caption);
-  color: var(--color-muted);
-}
-
-.note {
-  font: var(--text-caption);
-  font-size: 12px;
-  color: var(--color-muted);
-}
-
-.statusSelect select {
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  background: var(--surface);
-  font: var(--text-caption);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.status_open,
-.status_waiting {
-  color: var(--color-coral-strong);
-}
-
-.status_fixed,
-.status_checking {
-  color: var(--status-blocked);
-}
-
-.status_closed,
-.status_answered {
-  color: var(--status-pass);
-}
-
-.questions > :first-child {
-  margin-bottom: 4px;
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .caption {
-  margin-bottom: 14px;
   font: var(--text-caption);
   color: var(--color-muted);
 }
 
-.questionList {
-  display: grid;
-  gap: 10px;
-}
-
-.question {
-  display: grid;
-  justify-items: start;
-  gap: 4px;
-  padding: 16px 18px;
-  border: 1px solid var(--color-coral-soft);
-  border-radius: var(--radius-panel);
-  background: var(--color-coral-softer);
-}
-
-.question .statusSelect {
-  margin-top: 6px;
-}
-
-.answered {
-  border-color: var(--color-line);
-  background: transparent;
-}
-
-.bundle {
-  display: grid;
-  gap: 4px;
+.table {
   width: 100%;
-  margin-top: 20px;
-  padding: 18px;
-  border: 1px solid var(--color-sky-soft);
-  border-radius: var(--radius-panel);
-  background: var(--color-sky-softer);
+  border-collapse: collapse;
+  font: var(--text-body);
+}
+
+.table th,
+.table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--color-line);
   text-align: left;
+  vertical-align: middle;
 }
 
-.bundle:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-sky) 45%, transparent);
-}
-
-.bundle:disabled {
-  opacity: 0.5;
-}
-
-.bundle strong {
-  font: var(--text-body-strong);
-  font-size: 13px;
-}
-
-.bundle span {
+.table thead th {
   font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.title {
+  min-width: 220px;
+  overflow-wrap: anywhere;
+}
+
+.titleLink {
+  font: var(--text-body-strong);
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+
+.titleLink:hover,
+.titleLink:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+.key {
+  display: block;
+  font: var(--text-caption);
+  font-weight: 700;
   color: var(--color-muted);
 }
 
-@media (max-width: 1100px) {
-  .layout {
-    grid-template-columns: 1fr;
-    gap: 44px;
+.testCase {
+  max-width: 280px;
+  overflow-wrap: anywhere;
+}
+
+.tcId {
+  font-weight: 700;
+  color: var(--color-sky-strong);
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.date {
+  white-space: nowrap;
+  color: var(--color-muted);
+}
+
+/* 해결된 항목은 목록 아래로 내려가고 한발 물러선다. */
+.resolved .titleLink {
+  color: var(--color-muted);
+}
+
+@media (max-width: 640px) {
+  .actions {
+    width: 100%;
+  }
+
+  /* 좁은 화면에서는 표를 행마다 카드로 쌓는다. 셀 이름은 data-label로 보여 준다. */
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+  }
+
+  .table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .table td {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    justify-items: start;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: none;
+    padding: 3px 0;
+    border: 0;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    font: var(--text-caption);
+    font-weight: 700;
+    color: var(--color-muted);
+  }
+
+  /* 셀 안 내용을 한 덩어리로 둔다(grid가 링크와 외부 번호를 다른 열로 나누지 않게). */
+  .title .key {
+    grid-column: 2;
   }
 }
