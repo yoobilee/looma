@@ -14,12 +14,14 @@ interface SourceExportActionProps {
   recordId: string;
   /** 보관한 원본 파일의 형식. 원본이 없으면 undefined */
   sourceFormat?: ImportSourceFormat;
+  /** 가져온 원본 파일 이름. 신규 TC를 붙일 대상 파일로 보여 준다. */
+  sourceFileName?: string;
 }
 
 const MAX_PROBLEMS = 5;
 
 /** 가져온 원본 XLSX 형식을 유지해 기존 행의 값을 반영한(선택하면 신규 TC를 새 행으로 붙인) 파일을 내려받는다. */
-export function SourceExportAction({ kind, projectId, recordId, sourceFormat }: SourceExportActionProps) {
+export function SourceExportAction({ kind, projectId, recordId, sourceFormat, sourceFileName }: SourceExportActionProps) {
   const [state, setState] = useState<SourceExportState>({ status: 'idle' });
   const [appendNewTestCases, setAppendNewTestCases] = useState(false);
   const optionId = useId();
@@ -54,9 +56,10 @@ export function SourceExportAction({ kind, projectId, recordId, sourceFormat }: 
             aria-describedby={`${optionId}-hint`}
             onChange={(event) => setAppendNewTestCases(event.target.checked)}
           />
-          <label htmlFor={optionId}>Looma에서 만든 신규 TC도 새 행으로 추가</label>
+          <label htmlFor={optionId}>Looma에서 만든 신규 TC도 이 파일에 새 행으로 추가</label>
           <p id={`${optionId}-hint`} className={styles.notice}>
-            검토 완료 · 사용 중인 TC만 표 끝에 추가해요. 고객사 TC ID는 만들지 않아요.
+            {sourceFileName ? `대상: ${sourceFileName}의 표 끝. ` : '대상: 이 가져오기 원본 파일의 표 끝. '}
+            다른 가져오기 파일에는 추가하지 않아요. 검토 완료 · 사용 중인 TC만 추가하고, 고객사 TC ID가 없으면 ID 칸을 비워 둬요.
           </p>
         </div>
       )}

@@ -89,6 +89,8 @@ async function build(planned: SourceExportPlan, options: SourceExportOptions): P
     problems = ['내보낸 파일을 다시 읽을 수 없어요.'];
   }
   if (problems.length > 0) return { ok: false, problems: ['내보낸 파일을 다시 읽어 확인했더니 기대와 달라 내려주지 않았어요.', ...problems] };
+  // 실제로 붙인 행 기준으로 센다(시트 구조 때문에 붙이지 못했으면 세지 않는다).
+  const missingIds = plan.appends.filter((append) => append.missingExternalId).length;
   return {
     ok: true,
     fileName: sourceExportFileName(plan.fileName),
@@ -96,20 +98,18 @@ async function build(planned: SourceExportPlan, options: SourceExportOptions): P
     changedCells: result.changedCells,
     appendedRows: plan.appends.map(({ rowNumber, label }) => ({ rowNumber, label })),
     skipped: plan.skipped,
-    notices: plan.notices,
+    notices: missingIds > 0 ? [`고객사 TC ID가 없는 신규 TC ${missingIds}건은 TC ID 칸을 비운 채 추가했어요. Looma는 고객사 TC ID를 만들지 않아요.`, ...plan.notices] : plan.notices,
   };
 }
 
 export async function exportTestAssetSource(projectId: string, sessionId: string, options: SourceExportOptions = {}): Promise<SourceExportOutcome> {
   const repos = options.repos ?? repositories;
-  const sessions = await repos.testAssetImports.listByProject(projectId);
-  const session = sessions.find((item) => item.id === sessionId);
+  const session = (await repos.testAssetImports.listByProject(projectId)).find((item) => item.id === sessionId);
   if (!session) return { ok: false, problems: ['가져오기 기록을 찾을 수 없어요.'] };
   const artifact = session.artifactId ? await repos.importSources.get(session.artifactId) : undefined;
   const testCases = await repos.testCases.listByProject(projectId);
-  // 목록 순서에 기대지 않고 가져온 시각으로 가장 최근 가져오기를 정한다. 같은 시각의 다른 가져오기가 있으면 최근으로 보지 않는다.
-  const isLatestImport = sessions.every((item) => item.id === session.id || item.importedAt < session.importedAt);
-  return build(planTestAssetSourceExport(session, artifact, testCases, { appendNewTestCases: options.appendNewTestCases, isLatestImport }), options);
+  // 신규 TC를 붙일 파일은 사용자가 내보내기를 실행한 이 가져오기의 원본이다. 다른 가져오기 파일을 고르거나 나누지 않는다.
+  return build(planTestAssetSourceExport(session, artifact, testCases, { appendNewTestCases: options.appendNewTestCases }), options);
 }
 
 export async function exportResultSource(projectId: string, importId: string, options: SourceExportOptions = {}): Promise<SourceExportOutcome> {

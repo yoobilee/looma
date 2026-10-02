@@ -51,7 +51,7 @@ function HistoryRow({ item, base, sourceFormat }: { item: ImportHistoryItem; bas
       <Link className={styles.link} to={isResult ? `${base}/results?import=${encodeURIComponent(item.id)}` : `${base}/test-design`}>
         {isResult ? '수행 결과 보기' : '테스트 설계 보기'}
       </Link>
-      <SourceExportAction kind={item.type} projectId={item.projectId} recordId={item.id} sourceFormat={sourceFormat} />
+      <SourceExportAction kind={item.type} projectId={item.projectId} recordId={item.id} sourceFormat={sourceFormat} sourceFileName={item.fileName} />
     </li>
   );
 }

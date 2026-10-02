@@ -3,7 +3,8 @@
 - append-base.xlsx: 행을 추가할 수 있는 단순 TC 시트(공유 문자열 · 열별 다른 스타일 · 행 높이 · 틀 고정 · 다른 시트의 수식)
 - append-table.xlsx · append-autofilter.xlsx · append-merged.xlsx · append-cf.xlsx: 행 추가를 막아야 하는 구조
 - append-dv.xlsx: 새 행까지 덮는 데이터 유효성(I2:I1000)이라 행을 추가해도 되는 구조
-날짜 메타데이터는 고정해 다시 만들어도 내용이 같게 한다.
+- append-second.xlsx: append-base와 같은 구조에 다른 TC(ACC-001~003)가 있는 두 번째 고객사 파일
+날짜 메타데이터는 고정했지만 ZIP 항목 시각은 실행 시각이라 다시 만들면 bytes가 달라진다. 기존 fixture는 커밋된 bytes를 기준으로 쓴다.
 """
 
 import datetime
@@ -38,7 +39,7 @@ def apply(cell, style):
         setattr(cell, key, value)
 
 
-def base_workbook():
+def base_workbook(rows=ROWS):
     wb = Workbook()
     wb.properties.created = FIXED
     wb.properties.modified = FIXED
@@ -49,7 +50,7 @@ def base_workbook():
     ws = wb.create_sheet('TC')
     for index, header in enumerate(HEADERS, start=1):
         apply(ws.cell(row=1, column=index, value=header), header_style)
-    for row_index, values in enumerate(ROWS, start=2):
+    for row_index, values in enumerate(rows, start=2):
         for index, value in enumerate(values, start=1):
             cell = ws.cell(row=row_index, column=index, value=value)
             apply(cell, result_style if index == 9 else memo_style if index == 10 else text_style)
@@ -89,3 +90,11 @@ validation = DataValidation(type='list', formula1='"P,F,N/A"', allow_blank=True)
 validation.add('I2:I1000')
 ws.add_data_validation(validation)
 save(wb, 'append-dv.xlsx')
+
+ROWS_SECOND = [
+    ['ACC-001', '정상 흐름', '계정', '프로필', '닉네임 변경', '로그인 상태', '1. 프로필을 연다.', '닉네임 저장', 'P', None],
+    ['ACC-002', '예외', '계정', '프로필', '닉네임 빈 값 저장', '로그인 상태', '1. 닉네임을 지운다.', '저장 버튼 비활성', None, None],
+    ['ACC-003', '권한', '계정', '탈퇴', '탈퇴 재확인', '로그인 상태', '1. 탈퇴를 누른다.', '재확인 팝업 노출', None, None],
+]
+wb, ws = base_workbook(ROWS_SECOND)
+save(wb, 'append-second.xlsx')

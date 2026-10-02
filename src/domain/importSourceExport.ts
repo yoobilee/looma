@@ -1,6 +1,6 @@
 import { isXmlSafeText } from '@/lib/ooxml/xml';
 import { resultImportFieldLabel, testAssetImportFieldLabel, testCaseStatusLabel, testPerspectiveLabel, testResultLabel } from './labels';
-import { contentChanges, parseImportRow, type ColumnMapping, type ImportTable, type ImportTableRow, type TestAssetImportField } from './testAssetImport';
+import { compositeKey, contentChanges, parseImportRow, type ColumnMapping, type ImportTable, type ImportTableRow, type TestAssetImportField } from './testAssetImport';
 import { platformResultFields, resultValueKey, type ResultColumnMapping } from './testResultImport';
 import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession, TestCase, TestCaseStatus, TestResult, TestResultImport } from './types';
 
@@ -9,8 +9,8 @@ import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession
  * 파일 형식(XLSX XML)은 모른다. 모든 검증을 통과해야만 계획을 돌려주고, 하나라도 문제가 있으면 문제만 돌려준다.
  * - 행은 고객사 TC ID로 다시 찾지 않는다. 가져올 때 남긴 행 출처(TC: importSource, 결과: sourceRowNumber)만 쓴다.
  * - 가져올 때 매핑하지 않은 열은 바꾸지 않는다.
- * - 새 행은 TC 내보내기에서 요청했을 때만, Looma에서 만든 TC(importSource 없음)를 표 끝에 이어 붙인다(appends).
- *   넣을 수 없는 TC는 추측하지 않고 이유와 함께 skipped로 돌려준다. 고객사 TC ID는 만들지 않는다.
+ * - 새 행은 TC 내보내기에서 요청했을 때만, Looma에서 만든 TC(importSource 없음)를 그 가져오기의 원본 표 끝에 이어 붙인다(appends).
+ *   넣을 수 없는 TC는 추측하지 않고 이유와 함께 skipped로 돌려준다. 고객사 TC ID는 만들지 않는다(없으면 빈 칸).
  * - 만든 파일은 다시 읽어 verifySourceExportOutput으로 확인한다. 계획 단계의 확인만으로 끝내지 않는다.
  */
 
@@ -37,6 +37,8 @@ export interface SourceRowAppend {
   entityId: string;
   label: string;
   cells: string[];
+  /** 파일에 TC ID 열이 있지만 TC에 고객사 TC ID가 없어 그 칸을 비워 둔 행 */
+  missingExternalId: boolean;
 }
 
 /** 내보내기 대상이었지만 파일에 넣지 않은 항목과 이유 */
@@ -141,10 +143,8 @@ function differentFields(row: ImportTableRow, testCase: TestCase, mapping: Colum
 }
 
 export interface TestAssetSourceExportOptions {
-  /** Looma에서 만든 TC(importSource 없음)를 표 끝에 새 행으로 붙인다. 기본은 기존 행만 고친다. */
+  /** Looma에서 만든 TC(importSource 없음)를 이 가져오기의 원본 표 끝에 새 행으로 붙인다. 기본은 기존 행만 고친다. */
   appendNewTestCases?: boolean;
-  /** 이 가져오기가 프로젝트에서 가장 최근의 TC 가져오기인가. 아니면 새 행을 붙이지 않는다. */
-  isLatestImport?: boolean;
 }
 
 /** Excel 셀 하나에 넣을 수 있는 최대 글자 수 */
@@ -157,8 +157,11 @@ const testCaseLabel = (testCase: TestCase) => `${testCase.externalId ?? 'TC ID �
 
 /**
  * Looma에서 만든 TC를 원본 표 끝에 붙일 새 행으로 바꾼다. 하나라도 확신할 수 없는 TC는 넣지 않고 이유를 남긴다.
- * - 고객사 TC ID 열이 있는데 TC ID가 없으면 넣지 않는다. 번호를 만들거나 Looma 내부 ID를 대신 쓰지 않는다.
- * - 원본 파일에 같은 고객사 TC ID나 같은 내용의 행이 이미 있으면 넣지 않는다(가져오기에서 내용이 같아 연결되지 않은 TC 등).
+ * 대상 파일은 사용자가 내보내기를 실행한 이 가져오기의 원본 하나다. 다른 파일로 나누거나 대상을 추측하지 않는다.
+ * - 고객사 TC ID가 있으면 그 값을 쓰고, 없으면 TC ID 칸을 비운다. 번호를 만들거나 Looma 내부 ID를 대신 쓰지 않는다.
+ * - TC ID가 있으면 원본 파일 · 프로젝트에서 그 ID가 겹치지 않아야 한다.
+ * - TC ID 없이 쓰는 행은 다시 가져올 때 내용(기능 · 테스트 항목 · Pre-condition · Expected Result)으로만 TC를 찾으므로,
+ *   같은 조합의 원본 행이나 다른 TC가 있으면 넣지 않는다(가져오기와 같은 compositeKey 기준).
  * - 새 행을 가져오기 규칙으로 다시 읽어 지금 TC와 같은 뜻이고 다시 가져올 수 있는 행이어야 한다.
  */
 function planNewTestCaseRows(
@@ -167,7 +170,6 @@ function planNewTestCaseRows(
   snapshot: ImportSourceSnapshot,
   mapping: ColumnMapping,
   fields: Set<TestAssetImportField>,
-  isLatestImport: boolean,
 ): { appends: SourceRowAppend[]; skipped: SourceExportSkip[] } {
   const appends: SourceRowAppend[] = [];
   const skipped: SourceExportSkip[] = [];
@@ -176,9 +178,8 @@ function planNewTestCaseRows(
   // 새 행은 표 마지막 행 바로 아래에 둔다. 그 행이 TC 행(다시 가져올 수 있는 행)이 아니면(합계 · 메모 · 표 밖의 값 등) 위치를 추측하지 않는다.
   const lastRow = snapshot.rows[snapshot.rows.length - 1];
   const lastParsed = parseImportRow(lastRow, mapping);
-  const placementProblem = !isLatestImport
-    ? '이 프로젝트에 더 최근에 가져온 TC 파일이 있어요. 신규 TC는 가장 최근에 가져온 파일에만 추가해요.'
-    : !lastParsed.title || !lastParsed.expectedResult || !lastParsed.feature
+  const placementProblem =
+    !lastParsed.title || !lastParsed.expectedResult || !lastParsed.feature
       ? `원본 표의 마지막 행(${lastRow.rowNumber}행)이 TC 행이 아니라(빈 칸 · 합계 · 메모 등) 새 행을 추가할 위치를 확정할 수 없어요.`
       : undefined;
 
@@ -189,7 +190,6 @@ function planNewTestCaseRows(
     const id = testCase.externalId?.normalize('NFC').trim();
     if (id) externalIdCount.set(id, (externalIdCount.get(id) ?? 0) + 1);
   }
-  const plannedCells = new Map<string, string>();
   let nextRow = lastRow.rowNumber + 1;
 
   for (const testCase of candidates) {
@@ -210,10 +210,6 @@ function planNewTestCaseRows(
       continue;
     }
     const externalId = testCase.externalId?.normalize('NFC').trim();
-    if (fields.has('externalId') && !externalId) {
-      skip(testCase, '고객사 TC ID가 없어요. Looma는 고객사 TC ID를 만들지 않으므로, TC ID 열이 있는 파일에는 ID 없는 행을 추가하지 않아요.');
-      continue;
-    }
     if (fields.has('externalId') && externalId) {
       const sameId = snapshot.rows.find((row) => sameText(row.cells[mapping.indexOf('externalId')], externalId));
       if (sameId) {
@@ -247,19 +243,20 @@ function planNewTestCaseRows(
       skip(testCase, `지금 TC 값을 원본 열 구조로 정확히 옮길 수 없어요. (${different.join(', ')})`);
       continue;
     }
-    const sameContent = existingRows.find(({ parsed }) => Object.keys(contentChanges(parsed, testCase, fields)).length === 0 && sameText(parsed.externalId, reparsed.externalId));
-    if (sameContent) {
-      skip(testCase, `원본 파일 ${sameContent.rowNumber}행에 내용이 같은 행이 이미 있어요.`);
-      continue;
+    if (!reparsed.externalId) {
+      const key = compositeKey(testCase);
+      const sameRow = existingRows.find(({ parsed }) => compositeKey(parsed) === key);
+      if (sameRow) {
+        skip(testCase, `원본 파일 ${sameRow.rowNumber}행과 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.`);
+        continue;
+      }
+      const sameCase = projectTestCases.find((other) => other.id !== testCase.id && compositeKey(other) === key);
+      if (sameCase) {
+        skip(testCase, `다른 TC(${testCaseLabel(sameCase)})와 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.`);
+        continue;
+      }
     }
-    const cellsKey = JSON.stringify(cells.map((cell) => cell.normalize('NFC').trim()));
-    const twin = plannedCells.get(cellsKey);
-    if (twin) {
-      skip(testCase, `파일에 쓰일 내용이 다른 신규 TC(${twin})와 같아요.`);
-      continue;
-    }
-    plannedCells.set(cellsKey, testCaseLabel(testCase));
-    appends.push({ rowNumber: nextRow, entityId: testCase.id, label: testCaseLabel(testCase), cells });
+    appends.push({ rowNumber: nextRow, entityId: testCase.id, label: testCaseLabel(testCase), cells, missingExternalId: fields.has('externalId') && !externalId });
     nextRow += 1;
   }
   return { appends, skipped };
@@ -344,7 +341,7 @@ export function planTestAssetSourceExport(
         ...(otherImports > 0 ? [`다른 가져오기 파일의 행과 연결된 TC ${otherImports}건은 포함되지 않아요.`] : []),
       ];
   const ordered = [...newCases].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  const { appends, skipped } = ordered.length > 0 ? planNewTestCaseRows(ordered, projectTestCases, ready.snapshot, mapping, fields, options.isLatestImport ?? false) : { appends: [], skipped: [] };
+  const { appends, skipped } = ordered.length > 0 ? planNewTestCaseRows(ordered, projectTestCases, ready.snapshot, mapping, fields) : { appends: [], skipped: [] };
 
   const byId = new Map(projectTestCases.map((testCase) => [testCase.id, testCase]));
   const verifyEntities = (outputRows: ReadonlyMap<number, ImportTableRow>, appended: SourceRowAppend[]) => [
