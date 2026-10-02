@@ -24,3 +24,6 @@ dist/
 *.tsbuildinfo
 .vite/
 coverage/
+
+# Vitest browser mode (failure screenshots · attachments)
+.vitest/
