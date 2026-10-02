@@ -31,6 +31,7 @@ import type {
   TestAssetMatchKind,
 } from './testAssetImport';
 import type { ResultConflictReason, ResultImportField, ResultMatchKind } from './testResultImport';
+import type { ResultChangeType } from './resultComparison';
 
 // 화면에 보이는 한국어 라벨은 모두 이 파일에서 관리한다.
 // PASS/FAIL/BLOCKED, TC, Android/iOS처럼 QA 실무에서 그대로 쓰는 용어는 원문을 유지한다.
@@ -203,6 +204,24 @@ export const testResultLabel: Record<TestResultValue, string> = {
 };
 
 export const testResultOrder: TestResultValue[] = ['pass', 'fail', 'blocked', 'not_tested'];
+
+/** 수행 결과 비교에서 한쪽 차수에 결과 자체가 없을 때. 미수행과 다르다. */
+export const NO_RESULT_LABEL = '결과 없음';
+
+export const resultChangeTypeLabel: Record<ResultChangeType, string> = {
+  newly_failed: '신규 실패',
+  still_failed: '계속 실패',
+  fixed: '수정됨',
+  newly_blocked: '신규 차단',
+  unblocked: '차단 해제',
+  newly_not_tested: '신규 미수행',
+  resumed: '수행 재개',
+  unchanged_pass: '계속 PASS',
+  unchanged_blocked: '계속 차단',
+  unchanged_not_tested: '계속 미수행',
+  added_to_scope: '범위 추가',
+  removed_from_scope: '범위 제외',
+};
 
 export const issueTypeLabel: Record<IssueType, string> = {
   defect: '결함',
