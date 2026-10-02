@@ -135,9 +135,45 @@ describe('프로젝트 기록 탭', () => {
     await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_A}/issues?issue=issue-bug-014`);
   });
 
-  it('390px에서 가로로 넘치지 않는다', async () => {
+  // 원본 ID가 남은 기록. 개별 주소가 없는 화면(가져오기 이력 · 산출물 · 변경 분석)은 탭까지만 간다.
+  const linked = [
+    activity('결과-링크', '2026-10-02T09:00:00.000Z', { type: 'results_uploaded', metadata: { detail: 'PASS 3', resultImportId: 'imp-a-2' } }),
+    activity('TC-링크', '2026-10-02T10:00:00.000Z', { type: 'test_case_changed', metadata: { detail: '검토 완료', testCaseId: 'tc-002' } }),
+    activity('TC자산-링크', '2026-10-02T11:00:00.000Z', { type: 'test_assets_imported', metadata: { detail: 'a.csv', testAssetImportId: 'tai-1' } }),
+    activity('산출물-링크', '2026-10-02T12:00:00.000Z', { metadata: { detail: 'PDF', deliverableId: 'dlv-1' } }),
+    activity('반영-링크', '2026-10-02T13:00:00.000Z', { type: 'changes_applied', metadata: { detail: '요구사항 1 · TC 2', analysisId: 'cia-plan-v15' } }),
+    activity('결과-옛기록', '2026-10-02T14:00:00.000Z', { type: 'results_uploaded', metadata: { detail: 'PASS 3' } }),
+    activity('TC-엉뚱한key', '2026-10-02T15:00:00.000Z', { type: 'test_case_changed', metadata: { detail: '검토 완료', issueId: 'issue-bug-014' } }),
+  ];
+
+  it.each([
+    ['결과-링크', `/projects/${PROJECT_A}/results?import=imp-a-2`],
+    ['TC-링크', `/projects/${PROJECT_A}/test-design?tc=tc-002`],
+    ['TC자산-링크', `/projects/${PROJECT_A}/import-history`],
+    ['산출물-링크', `/projects/${PROJECT_A}`],
+    ['반영-링크', `/projects/${PROJECT_A}/test-design`],
+    ['이슈-링크', `/projects/${PROJECT_A}/issues?issue=issue-bug-014`],
+  ])('%s를 누르면 %s로 이동한다', async (title, path) => {
+    await mount([...base, ...linked]);
+    await userEvent.click(page.getByRole('link', { name: title }));
+    await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(path);
+  });
+
+  it('원본 ID가 없는 옛 기록 · 종류에 맞지 않는 key만 있는 기록은 텍스트로 남고, 필터 · 최신순은 그대로다', async () => {
+    const view = await mount([...base, ...linked]);
+    const linkTitles = [...view.querySelectorAll('a')].map((link) => link.textContent);
+    expect(linkTitles).toEqual(['반영-링크', '산출물-링크', 'TC자산-링크', 'TC-링크', '결과-링크', '이슈-링크']);
+    for (const title of ['결과-옛기록', 'TC-엉뚱한key', '이슈-옛기록', '산출물-늦은']) expect(titles(view)).toContain(title);
+    await userEvent.click(filterButton('TC'));
+    await expect.poll(() => titles(view)).toEqual(['TC-엉뚱한key', 'TC자산-링크', 'TC-링크']);
+    expect([...view.querySelectorAll('a')].map((link) => link.textContent)).toEqual(['TC자산-링크', 'TC-링크']);
+  });
+
+  it('390px에서 가로로 넘치지 않는다(긴 링크 제목 포함)', async () => {
     await page.viewport(390, 844);
-    await mount([...base, activity('아주 긴 제목 '.repeat(12), '2026-10-01T13:00:00.000Z')]);
+    const longLinked = activity('아주긴링크제목'.repeat(20), '2026-10-01T14:00:00.000Z', { type: 'results_uploaded', metadata: { resultImportId: 'imp-a-2' } });
+    const view = await mount([...base, ...linked, longLinked, activity('아주 긴 제목 '.repeat(12), '2026-10-01T13:00:00.000Z')]);
+    expect(view.querySelectorAll('a').length).toBeGreaterThan(0);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
   });
 });

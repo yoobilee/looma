@@ -29,15 +29,43 @@ describe('활동 분류', () => {
 });
 
 describe('활동 원본 링크', () => {
-  it('issueId가 있는 이슈 기록만 이슈 화면으로 연결한다', () => {
-    const linked = make('a', '2026-10-01T09:00:00.000Z', { metadata: { issueId: 'issue 1' } });
-    expect(activityLinkPath(linked, 'proj-1')).toBe('/projects/proj-1/issues?issue=issue%201');
-    expect(activityLinkPath({ ...linked, type: 'issue_resolved' }, 'proj-1')).toBe('/projects/proj-1/issues?issue=issue%201');
+  const at = '2026-10-01T09:00:00.000Z';
+  const linkOf = (type: ActivityType, metadata: Record<string, string>, projectId: string | null = 'proj-1') =>
+    activityLinkPath(make('a', at, { type, metadata: { detail: '요약', ...metadata }, ...(projectId && { projectId }) }), 'proj-1');
+
+  // 종류 · metadata key · 경로. 개별 주소가 없는 화면은 ID가 있어도 탭까지만 간다.
+  it.each([
+    ['issue_created', 'issueId', '/projects/proj-1/issues?issue=id%201'],
+    ['issue_updated', 'issueId', '/projects/proj-1/issues?issue=id%201'],
+    ['issue_resolved', 'issueId', '/projects/proj-1/issues?issue=id%201'],
+    ['results_uploaded', 'resultImportId', '/projects/proj-1/results?import=id%201'],
+    ['test_case_changed', 'testCaseId', '/projects/proj-1/test-design?tc=id%201'],
+    ['test_assets_imported', 'testAssetImportId', '/projects/proj-1/import-history'],
+    ['deliverable_added', 'deliverableId', '/projects/proj-1'],
+    ['changes_applied', 'analysisId', '/projects/proj-1/test-design'],
+  ] as [ActivityType, string, string][])('%s + %s → %s, ID가 없는 이전 기록은 링크가 없다', (type, key, path) => {
+    expect(linkOf(type, { [key]: 'id 1' })).toBe(path);
+    expect(linkOf(type, {})).toBeUndefined();
+    expect(linkOf(type, { [key]: '' })).toBeUndefined();
   });
 
-  it('issueId가 없거나 이슈 기록이 아니면 링크가 없다', () => {
-    expect(activityLinkPath(make('a', '2026-10-01T09:00:00.000Z'), 'proj-1')).toBeUndefined();
-    expect(activityLinkPath(make('b', '2026-10-01T09:00:00.000Z', { type: 'results_uploaded', metadata: { issueId: 'x' } }), 'proj-1')).toBeUndefined();
+  it('종류에 맞지 않는 metadata key만 있으면 링크가 없다', () => {
+    expect(linkOf('results_uploaded', { issueId: 'x', testCaseId: 'y' })).toBeUndefined();
+    expect(linkOf('issue_created', { resultImportId: 'x' })).toBeUndefined();
+    expect(linkOf('test_case_changed', { analysisId: 'x' })).toBeUndefined();
+  });
+
+  it('링크를 정하지 않은 종류는 metadata가 있어도 링크가 없다', () => {
+    const unlinked = (Object.keys(activityTypeLabel) as ActivityType[]).filter((type) => !['issues', 'results', 'testCases', 'deliverables'].includes(activityCategory[type]));
+    expect(unlinked.length).toBeGreaterThan(0);
+    for (const type of [...unlinked, 'requirements_analyzed' as const]) {
+      expect(linkOf(type, { issueId: 'x', resultImportId: 'x', testCaseId: 'x', testAssetImportId: 'x', deliverableId: 'x', analysisId: 'x' })).toBeUndefined();
+    }
+  });
+
+  it('다른 프로젝트 · 프로젝트 없는 활동은 지금 프로젝트로 연결하지 않는다', () => {
+    expect(linkOf('issue_created', { issueId: 'x' }, 'proj-2')).toBeUndefined();
+    expect(linkOf('issue_created', { issueId: 'x' }, null)).toBeUndefined();
   });
 });
 
