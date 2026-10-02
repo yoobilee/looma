@@ -81,6 +81,13 @@
   color: var(--color-muted);
 }
 
+.meta {
+  display: block;
+  margin-top: 2px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
 .testCase {
   max-width: 280px;
   overflow-wrap: anywhere;
@@ -152,7 +159,8 @@
   }
 
   /* 셀 안 내용을 한 덩어리로 둔다(grid가 링크와 외부 번호를 다른 열로 나누지 않게). */
-  .title .key {
+  .title .key,
+  .title .meta {
     grid-column: 2;
   }
 }

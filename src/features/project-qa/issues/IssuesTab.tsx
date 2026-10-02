@@ -14,7 +14,7 @@ import { useProjectContext } from '../projectContext';
 import { IssueCreateDialog } from './IssueCreateDialog';
 import { IssueDetailDialog } from './IssueDetailDialog';
 import { IssueStatusTag, IssueTypeTag } from './IssueTags';
-import { indexIssueLinks, isIssueFilter, issueFilters, loadIssueContext, matchesIssueFilter, sortIssues, type IssueFilter } from './issueView';
+import { indexIssueLinks, isIssueFilter, issueFilters, loadIssueContext, matchesIssueFilter, shortSourceLabel, sortIssues, sourceOf, type IssueFilter } from './issueView';
 import { QuestionBundleDialog } from './QuestionBundleDialog';
 import styles from './IssuesTab.module.css';
 
@@ -113,6 +113,9 @@ export function IssuesTab() {
           <tbody>
             {visible.map((issue) => {
               const { testCase, result, resultImport } = links.linksOf(issue);
+              const source = sourceOf(issue, deliverables);
+              // 기능 · 근거는 저장된 값을 그대로 보여 준다(이전 목록과 같은 표기).
+              const meta = [issue.feature && `기능 ${issue.feature}`, source && `근거 ${shortSourceLabel(source)}`].filter(Boolean).join(' · ');
               return (
                 <tr key={issue.id} className={issue.status === 'resolved' ? styles.resolved : undefined}>
                   <td data-label="유형">
@@ -126,6 +129,7 @@ export function IssuesTab() {
                       {issue.title}
                     </Link>
                     {issue.externalKey && <span className={styles.key}>{issue.externalKey}</span>}
+                    {meta && <span className={styles.meta}>{meta}</span>}
                   </td>
                   <td data-label="TC" className={styles.testCase}>
                     {testCase ? (
@@ -170,6 +174,7 @@ export function IssuesTab() {
           projectId={project.id}
           issue={openIssue}
           links={openLinks}
+          source={sourceOf(openIssue, deliverables)}
           laterResults={openLinks.result ? laterResultsFor(openLinks.result, imports, results) : []}
           onClose={() => setSearchParams(params({ issue: null }), { replace: true })}
         />

@@ -1,5 +1,6 @@
 import type { Repositories } from '@/data';
-import type { Issue, IssueStatus, TestCase, TestResult, TestResultImport } from '@/domain/types';
+import { deliverableTypeLabel } from '@/domain/labels';
+import type { Deliverable, Issue, IssueStatus, TestCase, TestResult, TestResultImport } from '@/domain/types';
 
 /*
  * 이슈 · 확인사항 화면 전용 규칙: 필터 · 목록 순서 · 연결 표시. 저장하지 않고 매번 계산한다.
@@ -62,6 +63,21 @@ export function indexIssueLinks({ testCases, imports, results }: IssueLinkContex
     },
   };
 }
+
+/** 근거 산출물 위치. 저장된 sourceRef를 그대로 보여 준다. 산출물을 찾지 못하면 위치만 있다. */
+export interface IssueSource {
+  deliverable?: Deliverable;
+  locator: string;
+}
+
+export function sourceOf(issue: Pick<Issue, 'sourceRef'>, deliverables: Deliverable[]): IssueSource | undefined {
+  if (!issue.sourceRef) return undefined;
+  const deliverable = deliverables.find((item) => item.id === issue.sourceRef!.deliverableId);
+  return { ...(deliverable && { deliverable }), locator: issue.sourceRef.locator };
+}
+
+/** 목록용 짧은 근거 표기(예: PDF p.14). */
+export const shortSourceLabel = (source: IssueSource) => `${source.deliverable ? deliverableTypeLabel[source.deliverable.type] : '산출물'} ${source.locator}`.trim();
 
 /** 같은 결과에 이미 만든 항목. 여러 개를 허용하고 막지 않는다(표시만 한다). */
 export function issuesByResult(issues: Issue[]): Map<string, Issue[]> {

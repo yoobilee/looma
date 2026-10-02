@@ -678,6 +678,10 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           const result = input.resultId ? draft.results.find((item) => item.id === input.resultId) : undefined;
           const resultImport = result && draft.resultImports.find((item) => item.id === result.importId);
           if (input.resultId && resultImport?.projectId !== projectId) throw notFound('수행 결과', input.resultId);
+          // 결과가 가리키는 TC도 같은 프로젝트에 있어야 한다. TC 없는(미연결) 결과는 TC 없이 연결하고, 입력 TC와 다르면 buildIssue가 거부한다.
+          if (result?.testCaseId && !draft.testCases.some((item) => item.id === result.testCaseId && item.projectId === projectId)) {
+            throw new Error(`수행 결과가 이 프로젝트에 없는 TC를 가리켜요. (${result.testCaseId})`);
+          }
           if (!input.resultId && input.testCaseId && !draft.testCases.some((item) => item.id === input.testCaseId && item.projectId === projectId)) {
             throw notFound('TC', input.testCaseId);
           }

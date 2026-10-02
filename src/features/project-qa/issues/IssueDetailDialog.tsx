@@ -9,13 +9,15 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { RadioGroup, TextAreaField, TextField } from '@/components/ui/Field';
 import { ResultTag } from '@/components/ui/Tag';
-import { resultRoundPath, testCasePath, type IssueLinks } from './issueView';
+import { resultRoundPath, testCasePath, type IssueLinks, type IssueSource } from './issueView';
 import styles from './IssueDetailDialog.module.css';
 
 interface IssueDetailDialogProps {
   projectId: string;
   issue: Issue;
   links: IssueLinks;
+  /** 저장된 근거 산출물 위치(sourceRef). 읽기 전용이다. */
+  source?: IssueSource;
   /** 연결된 결과 뒤의 같은 TC · 플랫폼 결과. 보여 주기만 하고 상태를 바꾸지 않는다. */
   laterResults: LaterResult[];
   onClose: () => void;
@@ -38,7 +40,7 @@ const toDraft = (issue: Issue): Draft => ({
  * 이슈 · 확인사항 상세 · 편집. 연결(TC · 결과)은 보여 주기만 하고 바꾸지 않는다.
  * 이후 수행 결과가 PASS여도 상태는 사용자가 직접 바꾼다.
  */
-export function IssueDetailDialog({ projectId, issue, links, laterResults, onClose }: IssueDetailDialogProps) {
+export function IssueDetailDialog({ projectId, issue, links, source, laterResults, onClose }: IssueDetailDialogProps) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(issue));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +111,20 @@ export function IssueDetailDialog({ projectId, issue, links, laterResults, onClo
               <dt>연결된 결과</dt>
               <dd>{result ? <ResultTag result={result.result} /> : '-'}</dd>
             </div>
+            {issue.feature && (
+              <div>
+                <dt>기능</dt>
+                <dd>{issue.feature}</dd>
+              </div>
+            )}
+            {source && (
+              <div className={styles.wide}>
+                <dt>근거</dt>
+                <dd>
+                  {source.deliverable ? source.deliverable.title : <span className={styles.muted}>찾을 수 없는 산출물</span>} · {source.locator}
+                </dd>
+              </div>
+            )}
           </dl>
 
           {result && (

@@ -9,6 +9,7 @@ import { createSeed, PROJECT_A } from '../mock/seed';
 import { CURRENT_SCHEMA_VERSION, type AppData, type StoredAppState } from './appData';
 import { openIndexedDbStateStore } from './indexedDbStateStore';
 import { createLocalRepositories, type LocalRepositoryOptions } from './localRepositories';
+import type { StateStore } from './stateStore';
 import { createBroadcastStateChannel } from './stateChannel';
 
 /*
@@ -496,5 +497,78 @@ describe('v1 저장 데이터 변환 (실제 IndexedDB)', () => {
     await expectPersistenceError(tabB.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'B 탭 이슈' }), 'conflict');
     await expectPersistenceError(tabB.issues.updateStatus('issue-bug-014', 'resolved'), 'conflict');
     expect(await inspectDatabase(name)).toEqual(stored);
+  });
+});
+
+describe('v1 변환 fail-closed (실제 IndexedDB)', () => {
+  type LegacyData = Record<'issues' | 'results', Record<string, unknown>[]>;
+
+  /** 이전 버전 앱이 저장한 v1 상태(revision 8)와 원본 bytes 하나를 실제 IndexedDB에 넣는다. */
+  async function seedLegacy(factory: IDBFactory, change: (data: LegacyData) => void = () => {}, schemaVersion = 1) {
+    const legacy = legacyV1State(7);
+    change(legacy.data as LegacyData);
+    const store = await openIndexedDbStateStore(factory);
+    await store.initialize({ ...legacy, schemaVersion });
+    await store.commit({ expectedRevision: 7, schemaVersion, savedAt: legacy.savedAt, data: legacy.data as AppData, artifacts: [{ id: 'src-legacy', bytes: new Blob(['v1 원본 bytes']) }] });
+  }
+
+  /** 열면 막히고, IndexedDB의 상태 · revision · 원본 bytes가 그대로이며 메모리에 아무 데이터도 없다. */
+  async function expectBlocked(factory: IDBFactory, name: string, reason: string, store?: () => Promise<StateStore>) {
+    const before = await inspectDatabase(name);
+    const repos = createLocalRepositories({ openStore: store ?? (() => openIndexedDbStateStore(factory)) });
+    await repos.persistence.load();
+    expect(repos.persistence.getStatus()).toMatchObject({ state: 'blocked', reason });
+    const after = await inspectDatabase(name);
+    expect(after).toEqual(before);
+    expect(after.state.revision).toBe(8);
+    expect(after.artifacts.get('src-legacy')).toBe('v1 원본 bytes');
+    expect(await repos.projects.list()).toEqual([]);
+    expect(await repos.issues.listByProject(PROJECT_A)).toEqual([]);
+    await expectPersistenceError(repos.tasks.create({ title: 'x' }), 'unavailable');
+    return repos;
+  }
+
+  it.each([
+    ['Issue.title이 객체', (data: LegacyData) => void (data.issues[0].title = { text: '제목' })],
+    ['TestResult ID 중복', (data: LegacyData) => void (data.results[1].id = data.results[0].id)],
+    ['같은 이슈를 결과 2개가 가리킴', (data: LegacyData) => void (data.results.find((result) => result.id === 'imp-a-2-SIGN-002-android')!.issueId = 'issue-bug-014')],
+    ['없는 이슈를 가리킴', (data: LegacyData) => void (data.results[0].issueId = 'issue-missing')],
+  ])('%s → migration_failed, IndexedDB의 v1 상태 · revision · 원본 bytes · 메모리 그대로', async (_, change) => {
+    const { factory, name } = isolatedFactory();
+    await seedLegacy(factory, change);
+    await expectBlocked(factory, name, 'migration_failed');
+    expect((await inspectDatabase(name)).state.schemaVersion).toBe(1);
+  });
+
+  it('schemaVersion 2로 적힌 v1 모양 데이터는 corrupt로 막고 바꾸지 않는다', async () => {
+    const { factory, name } = isolatedFactory();
+    await seedLegacy(factory, () => {}, CURRENT_SCHEMA_VERSION);
+    await expectBlocked(factory, name, 'corrupt');
+  });
+
+  it('변환한 v2를 IndexedDB에 저장하지 못하면 메모리에도 v2가 없고, 실패가 사라지면 다시 불러와 변환한다', async () => {
+    const { factory, name } = isolatedFactory();
+    await seedLegacy(factory);
+    // 실제 IndexedDB 저장소의 commit만 한 번 실패시킨다(transaction은 시작하지 않는다).
+    let failCommit = true;
+    const flaky = async (): Promise<StateStore> => {
+      const real = await openIndexedDbStateStore(factory);
+      return { ...real, commit: (input) => (failCommit ? Promise.reject(new DOMException('quota', 'QuotaExceededError')) : real.commit(input)) };
+    };
+    const repos = await expectBlocked(factory, name, 'migration_failed', flaky);
+    expect(await repos.issues.get('issue-bug-014')).toBeUndefined();
+    expect(await repos.testResults.listImports(PROJECT_A)).toEqual([]);
+
+    failCommit = false;
+    await repos.persistence.load();
+    expect(repos.persistence.getStatus()).toMatchObject({ state: 'ready', revision: 9 });
+    const saved = await inspectDatabase(name);
+    expect(saved.state).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 9 });
+    expect(saved.artifacts.get('src-legacy')).toBe('v1 원본 bytes');
+    expect(await repos.issues.get('issue-bug-014')).toMatchObject({ resultId: 'imp-a-2-SIGN-002-ios' });
+    // 새로고침(새 연결)에서도 그대로이며 다시 변환하지 않는다.
+    const reopened = await openTab(factory);
+    expect(await inspectDatabase(name)).toEqual(saved);
+    expect(await reopened.issues.get('issue-bug-014')).toEqual(await repos.issues.get('issue-bug-014'));
   });
 });

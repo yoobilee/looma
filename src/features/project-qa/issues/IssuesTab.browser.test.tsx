@@ -8,7 +8,7 @@ import '@/styles/base.css';
 import type { AppData, StoredAppState } from '@/data/local/appData';
 import { createLocalRepositories } from '@/data/local/localRepositories';
 import { createMemoryStateStore } from '@/data/local/stateStore';
-import { importQaRound, qaScenarioSeed } from '@/data/mock/issueScenario';
+import { importQaRound, legacyV1State, qaScenarioSeed } from '@/data/mock/issueScenario';
 import { createSeed, PROJECT_A } from '@/data/mock/seed';
 import type { Repositories } from '@/data/repositories/types';
 import { issueStatusLabel } from '@/domain/labels';
@@ -118,7 +118,7 @@ describe('이슈 / 확인사항 화면', () => {
     await expect.poll(() => location.search).toBe('?filter=defect');
     await expect.poll(() => new Set(rows(view).map((row) => cell(row, '유형')))).toEqual(new Set(['이슈']));
     await userEvent.click(filterButton('보류'));
-    await expect.poll(() => rows(view).map((row) => cell(row, '제목'))).toEqual(['약관 재동의 조건']);
+    await expect.poll(() => rows(view).map((row) => row.querySelector('td[data-label="제목"] a')?.textContent)).toEqual(['약관 재동의 조건']);
     await userEvent.click(filterButton('해결됨'));
     await expect.poll(() => location.search).toBe('?filter=resolved');
     await expect.poll(() => new Set(rows(view).map((row) => cell(row, '상태')))).toEqual(new Set(['해결됨']));
@@ -241,5 +241,86 @@ describe('이슈 / 확인사항 화면', () => {
     expect(getComputedStyle(link).color).toBe('rgb(238, 240, 245)');
     const tag = view.querySelector('td[data-label="상태"] span') as HTMLElement;
     expect(getComputedStyle(tag).color).not.toBe(getComputedStyle(document.body).backgroundColor);
+  });
+});
+
+describe('이슈 / 확인사항 화면 · 기존 기능 · 근거 표시', () => {
+  const detailFacts = () => Object.fromEntries([...dialog()!.querySelectorAll('dl > div')].map((item) => [item.querySelector('dt')!.textContent, item.querySelector('dd')!.textContent]));
+
+  it('v1에서 옮긴 BUG-014의 기능 · 근거(sourceRef)를 목록과 상세에서 읽기 전용으로 보여 준다', async () => {
+    // 저장소에 v1 데이터를 두고 열면 v2로 변환된다.
+    const store = createMemoryStateStore(legacyV1State());
+    const { view } = await mount('', { store });
+    expect((store.inspect().state as StoredAppState).schemaVersion).toBe(2);
+    const row = rows(view).find((item) => cell(item, '제목').startsWith('iOS 비밀번호 오류 문구'))!;
+    expect(cell(row, '제목')).toContain('기능 회원가입 · 근거 PDF p.14');
+
+    await userEvent.click(page.getByRole('link', { name: 'iOS 비밀번호 오류 문구가 기획과 다름' }));
+    await expect.poll(() => dialog()).toBeTruthy();
+    expect(detailFacts()).toMatchObject({ 기능: '회원가입', 근거: '모바일_개편_기획_v1.4.pdf · p.14', 차수: '2차 수행 결과', 플랫폼: 'iOS' });
+    // 편집할 수 있는 입력으로 바뀌지 않는다.
+    expect(dialog()!.querySelector('input[value="회원가입"], input[value="p.14"]')).toBeNull();
+  });
+
+  it('일반 확인사항을 만들 때 고른 기능이 목록 · 상세에 보인다', async () => {
+    const store = createMemoryStateStore();
+    const { view } = await mount('', { store, createInitialData: qaScenarioSeed });
+    await userEvent.click(page.getByRole('button', { name: '확인사항 추가' }));
+    await userEvent.fill(page.getByLabelText('제목', { exact: true }), '로그인 정책 확인');
+    await userEvent.selectOptions(page.getByLabelText('기능', { exact: true }).element() as HTMLSelectElement, '로그인');
+    await userEvent.click(page.getByRole('button', { name: '확인사항 만들기' }));
+    await expect.poll(() => rows(view).length).toBe(1);
+    expect(cell(rows(view)[0], '제목')).toContain('기능 로그인');
+
+    await userEvent.click(page.getByRole('link', { name: '로그인 정책 확인' }));
+    await expect.poll(() => dialog()).toBeTruthy();
+    expect(detailFacts()).toMatchObject({ 기능: '로그인' });
+    expect(detailFacts()).not.toHaveProperty('근거');
+  });
+
+  it('기능 · 근거가 없는 항목은 그 칸 없이 열리고, 산출물을 찾을 수 없는 근거는 위치만 보여 준다', async () => {
+    const store = createMemoryStateStore();
+    const seed = createSeed();
+    const orphanSource = seed.issues.find((issue) => issue.id === 'issue-q-lock-policy')!;
+    orphanSource.sourceRef = { deliverableId: 'dlv-deleted', locator: 'p.99' };
+    await openRepos(store, () => seed);
+    // 푸시 알림 기본값: 기능만 있고 근거는 없다.
+    await mount('?issue=issue-q-push', { store });
+    await expect.poll(() => dialog()).toBeTruthy();
+    expect(detailFacts()).toMatchObject({ 기능: '마이페이지' });
+    expect(detailFacts()).not.toHaveProperty('근거');
+    await unmount();
+
+    const { view } = await mount('?issue=issue-q-lock-policy', { store });
+    await expect.poll(() => dialog()).toBeTruthy();
+    expect(detailFacts()).toMatchObject({ 근거: '찾을 수 없는 산출물 · p.99' });
+    expect(cell(rows(view).find((row) => cell(row, '제목').startsWith('계정 잠금 정책'))!, '제목')).toContain('근거 산출물 p.99');
+  });
+
+  it('기능 · 근거가 모두 없는 항목도 목록 · 상세가 깨지지 않는다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store, qaScenarioSeed);
+    const bare = await repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: '연결 없는 이슈' });
+    const { view } = await mount(`?issue=${bare.id}`, { store });
+    await expect.poll(() => dialog()).toBeTruthy();
+    expect(Object.keys(detailFacts())).toEqual(['TC', '차수', '플랫폼', '연결된 결과']);
+    expect(rows(view)[0].querySelector('td[data-label="제목"] span')).toBeNull();
+  });
+
+  it('390px에서 긴 기능 · 근거도 목록 카드 · 상세 대화상자 안에서 줄바꿈된다', async () => {
+    await page.viewport(390, 844);
+    const store = createMemoryStateStore();
+    const seed = createSeed();
+    const target = seed.issues.find((issue) => issue.id === 'issue-bug-014')!;
+    target.feature = '회원가입-비밀번호-정책-길이-검증-'.repeat(4);
+    target.sourceRef = { deliverableId: 'dlv-plan-pdf', locator: `p.14-${'섹션'.repeat(30)}` };
+    await openRepos(store, () => seed);
+    const { view } = await mount('?issue=issue-bug-014', { store });
+    await expect.poll(() => dialog()).toBeTruthy();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+    for (const td of view.querySelectorAll('tbody td')) expect(td.getBoundingClientRect().right).toBeLessThanOrEqual(390.5);
+    const box = dialog()!.getBoundingClientRect();
+    expect(box.right).toBeLessThanOrEqual(390.5);
+    for (const dd of dialog()!.querySelectorAll('dd')) expect(dd.getBoundingClientRect().right).toBeLessThanOrEqual(box.right + 0.5);
   });
 });

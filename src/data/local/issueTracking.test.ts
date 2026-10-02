@@ -5,10 +5,11 @@ import type { Issue } from '@/domain/types';
 import { PersistenceError } from '../persistenceError';
 import type { PersistenceStatus, Repositories } from '../repositories/types';
 import { importQaRound, legacyV1State, QA_TEST_CASE_ID, qaScenarioSeed } from '../mock/issueScenario';
-import { createSeed, PROJECT_A } from '../mock/seed';
+import { createSeed, PROJECT_A, PROJECT_B } from '../mock/seed';
 import { CURRENT_SCHEMA_VERSION, type AppData, type StoredAppState } from './appData';
 import { createLocalRepositories, type LocalRepositoryOptions } from './localRepositories';
-import { migrateAppData, migrateV1ToV2 } from './migrations';
+import { LegacyLinkError, migrateAppData, migrateV1ToV2 } from './migrations';
+import { StoredDataError } from './schemaValidation';
 import { createMemoryChannelHub } from './stateChannel';
 import { createMemoryStateStore, type StateStore } from './stateStore';
 
@@ -36,8 +37,34 @@ const BLOCKED_RESULT = 'imp-a-2-LOGIN-018-android';
 const PASS_RESULT = 'imp-a-2-SIGN-001-android';
 
 /** 저장된 v1 데이터. 엔티티 모양이 현재 타입과 달라 레코드로 다룬다. */
-type LegacyData = { issues: Record<string, unknown>[]; results: Record<string, unknown>[] };
+type LegacyData = Record<'issues' | 'results' | 'resultImports' | 'projects', Record<string, unknown>[]>;
 const legacyData = () => legacyV1State().data as LegacyData;
+
+/**
+ * v1로 저장된 상태(revision 8)와 원본 bytes 하나. change로 저장 전 v1 데이터를 바꾼다.
+ * schemaVersion을 주면 그 버전 표기로 저장한다(버전 표기와 실제 모양이 다른 경우).
+ */
+async function legacyStore(change: (data: LegacyData) => void = () => {}, schemaVersion = 1) {
+  const state = legacyV1State(7);
+  change(state.data as LegacyData);
+  const store = createMemoryStateStore({ ...state, schemaVersion });
+  await store.commit({ expectedRevision: 7, schemaVersion, savedAt: state.savedAt, data: state.data as AppData, artifacts: [{ id: 'src-legacy', bytes: new Blob(['v1 원본 bytes']) }] });
+  return store;
+}
+
+/** 열면 막히고, 저장 상태 · revision · 원본 bytes가 그대로이며 메모리에도 아무 데이터가 없다. */
+async function expectBlockedUnchanged(store: ReturnType<typeof createMemoryStateStore>, reason: 'migration_failed' | 'corrupt') {
+  const before = store.inspect();
+  const repos = await openTab(store);
+  expect(repos.persistence.getStatus()).toMatchObject({ state: 'blocked', reason });
+  expect(store.inspect()).toEqual(before);
+  expect((before.state as StoredAppState).revision).toBe(8);
+  expect(await (await store.readArtifactBytes('src-legacy'))!.text()).toBe('v1 원본 bytes');
+  expect(await repos.projects.list()).toEqual([]);
+  expect(await repos.issues.listByProject(PROJECT_A)).toEqual([]);
+  await expect(repos.tasks.create({ title: 'x' })).rejects.toBeInstanceOf(PersistenceError);
+  return repos;
+}
 
 const deepFreeze = <T>(value: T): T => {
   if (typeof value === 'object' && value !== null) {
@@ -77,44 +104,115 @@ describe('v1 → v2 변환(이슈 · 확인사항 추적)', () => {
     expect(migrated.issues.filter((issue) => issue.resultId)).toHaveLength(2);
   });
 
-  it('한 이슈를 여러 결과가 가리키거나, 프로젝트 · TC가 어긋나면 결과를 고르지 않고 연결하지 않는다', () => {
-    const legacy = legacyData();
-    // BUG-014를 iOS · Android 결과가 함께 가리킨다.
-    legacy.results.find((result) => result.id === 'imp-a-2-SIGN-002-android')!.issueId = 'issue-bug-014';
-    // BUG-015의 TC가 결과의 TC와 다르다.
-    legacy.issues.find((issue) => issue.id === 'issue-bug-015')!.testCaseId = 'tc-001';
-    const migrated = migrateV1ToV2(legacy) as AppData;
-    expect(migrated.issues.find((issue) => issue.id === 'issue-bug-014')).not.toHaveProperty('resultId');
-    expect(migrated.issues.find((issue) => issue.id === 'issue-bug-014')).toMatchObject({ testCaseId: 'tc-002' });
-    expect(migrated.issues.find((issue) => issue.id === 'issue-bug-015')).toMatchObject({ testCaseId: 'tc-001' });
-    expect(migrated.issues.find((issue) => issue.id === 'issue-bug-015')).not.toHaveProperty('resultId');
-    expect(migrated.results.some((result) => 'issueId' in result)).toBe(false);
-
-    const crossProject = legacyData();
-    crossProject.issues.find((issue) => issue.id === 'issue-bug-014')!.projectId = 'proj-other';
-    expect((migrateV1ToV2(crossProject) as AppData).issues.find((issue) => issue.id === 'issue-bug-014')).not.toHaveProperty('resultId');
+  it('정상 1:1 연결만 옮기고, 배열 순서를 뒤집어도 결과가 같다', () => {
+    const sortById = <T extends { id: string }>(items: T[]) => [...items].sort((a, b) => a.id.localeCompare(b.id));
+    const forward = migrateV1ToV2(legacyData()) as AppData;
+    const reversed = legacyData() as LegacyData & Record<string, unknown[]>;
+    for (const key of ['issues', 'results', 'resultImports', 'projects']) reversed[key] = [...reversed[key]].reverse();
+    const backward = migrateV1ToV2(reversed) as AppData;
+    expect(sortById(backward.issues)).toEqual(sortById(forward.issues));
+    expect(sortById(backward.results)).toEqual(sortById(forward.results));
   });
 
-  it('이슈 목록이 없으면 빈 목록이고, 이슈가 없는 프로젝트는 빈 목록을 돌려준다', async () => {
-    const legacy = legacyV1State();
-    delete (legacy.data as Partial<AppData>).issues;
-    expect((migrateV1ToV2(legacy.data) as AppData).issues).toEqual([]);
+  // v1 결과 → 이슈 연결을 1:1로 옮길 수 없으면 연결을 지우거나 하나를 고르지 않고 변환 전체를 멈춘다.
+  it.each([
+    ['같은 이슈를 결과 2개가 가리킴', (data: LegacyData) => void (data.results.find((result) => result.id === 'imp-a-2-SIGN-002-android')!.issueId = 'issue-bug-014'), '여러 개'],
+    ['이슈와 결과 차수의 프로젝트가 다름', (data: LegacyData) => void (data.issues.find((issue) => issue.id === 'issue-bug-014')!.projectId = PROJECT_B), '다른 프로젝트'],
+    ['결과의 차수가 없음', (data: LegacyData) => void (data.results.find((result) => result.id === FAIL_RESULT)!.importId = 'imp-missing'), '다른 프로젝트'],
+    ['이슈의 TC와 결과의 TC가 다름', (data: LegacyData) => void (data.issues.find((issue) => issue.id === 'issue-bug-015')!.testCaseId = 'tc-001'), 'TC가 달라요'],
+    ['이슈에는 TC가 있는데 결과는 TC 미연결', (data: LegacyData) => void delete data.results.find((result) => result.id === FAIL_RESULT)!.testCaseId, 'TC가 달라요'],
+    ['없는 이슈를 가리킴(orphan)', (data: LegacyData) => void (data.results.find((result) => result.id === PASS_RESULT)!.issueId = 'issue-missing'), '없는 이슈'],
+  ])('%s → 변환 실패, v1 결과의 issueId · 저장 상태 · revision · 원본 bytes · 메모리 모두 그대로', async (_, breakLink, reason) => {
+    const broken = legacyData();
+    breakLink(broken);
+    expect(() => migrateV1ToV2(broken)).toThrow(LegacyLinkError);
+    expect(() => migrateV1ToV2(broken)).toThrow(reason);
+    const reversed = { ...broken, results: [...broken.results].reverse(), issues: [...broken.issues].reverse() };
+    expect(() => migrateV1ToV2(reversed)).toThrow(reason);
+
+    const store = await legacyStore(breakLink);
+    await expectBlockedUnchanged(store, 'migration_failed');
+    const kept = (await storedState(store)).data as unknown as LegacyData;
+    const linkedIds = (data: LegacyData) => data.results.filter((result) => result.issueId !== undefined).map((result) => `${String(result.id)}→${String(result.issueId)}`).sort();
+    expect(linkedIds(kept)).toEqual(linkedIds(broken));
+  });
+
+  it('이슈 목록이 없고 결과 연결도 없으면 빈 목록이며, 이슈가 없는 프로젝트는 빈 목록을 돌려준다', async () => {
+    const legacy = legacyData();
+    delete (legacy as Partial<LegacyData>).issues;
+    for (const result of legacy.results) delete result.issueId;
+    expect((migrateV1ToV2(legacy) as AppData).issues).toEqual([]);
 
     const repos = await openTab(createMemoryStateStore(legacyV1State()));
-    const [otherProject] = (await repos.projects.list()).filter((project) => project.id !== PROJECT_A);
-    expect(await repos.issues.listByProject(otherProject.id)).toEqual([]);
+    expect(await repos.issues.listByProject(PROJECT_B)).toEqual([]);
   });
 
-  it('알 수 없는 상태 · 모양이면 실패로 알리고(migration_failed), 입력은 바꾸지 않는다', () => {
-    const legacy = legacyData();
-    legacy.issues[0].status = 'reopened';
-    expect(() => migrateV1ToV2(legacy)).toThrow('알 수 없는 이슈 상태');
-    expect(migrateAppData(1, legacy)).toEqual({ status: 'failed', version: 1 });
-    expect(migrateAppData(1, { results: [] })).toEqual({ status: 'failed', version: 1 });
+  // 해석할 수 없는 v1은 v2로 올리지 않는다(화면에서 나중에 깨지지 않게 저장 전에 막는다).
+  it.each([
+    ['Issue.title이 객체', (data: LegacyData) => void (data.issues[0].title = { text: '제목' }), 'issues[0].title'],
+    ['Issue.type이 알 수 없는 값', (data: LegacyData) => void (data.issues[0].type = 'bug'), 'issues[0].type'],
+    ['Issue.status가 알 수 없는 값', (data: LegacyData) => void (data.issues[0].status = 'reopened'), 'issues[0].status'],
+    ['Issue.createdAt이 날짜가 아님', (data: LegacyData) => void (data.issues[0].createdAt = 'not-a-date'), 'issues[0].createdAt'],
+    ['Issue.updatedAt이 날짜가 아님', (data: LegacyData) => void (data.issues[0].updatedAt = 'yesterday'), 'issues[0].updatedAt'],
+    ['Issue.resolvedAt이 날짜가 아님', (data: LegacyData) => void (data.issues[0].resolvedAt = 12), 'issues[0].resolvedAt'],
+    ['Issue.id가 없음', (data: LegacyData) => void delete data.issues[0].id, 'issues[0].id'],
+    ['Issue.id가 빈 문자열', (data: LegacyData) => void (data.issues[0].id = ' '), 'issues[0].id'],
+    ['Issue.projectId가 문자열이 아님', (data: LegacyData) => void (data.issues[0].projectId = 1), 'issues[0].projectId'],
+    ['Issue.testCaseId가 문자열이 아님', (data: LegacyData) => void (data.issues[0].testCaseId = ['tc-002']), 'issues[0].testCaseId'],
+    ['Issue.sourceRef 모양이 아님', (data: LegacyData) => void (data.issues[0].sourceRef = { locator: 'p.14' }), 'issues[0].sourceRef.deliverableId'],
+    ['v1 Issue에 v2 resultId가 있음', (data: LegacyData) => void (data.issues[0].resultId = FAIL_RESULT), 'issues[0].resultId'],
+    ['Issue ID 중복', (data: LegacyData) => void (data.issues[1].id = data.issues[0].id), 'issues[1].id'],
+    ['TestResult ID 중복', (data: LegacyData) => void (data.results[1].id = data.results[0].id), 'results[1].id'],
+    ['TestResult.issueId가 문자열이 아님', (data: LegacyData) => void (data.results[0].issueId = 3), 'results[0].issueId'],
+    ['TestResult.result가 알 수 없는 값', (data: LegacyData) => void (data.results[0].result = 'P'), 'results[0].result'],
+    ['TestResultImport ID 중복', (data: LegacyData) => void (data.resultImports[1].id = data.resultImports[0].id), 'resultImports[1].id'],
+    ['Project ID 중복', (data: LegacyData) => void (data.projects[1].id = data.projects[0].id), 'projects[1].id'],
+  ])('%s → 변환 실패(migration_failed), v1 · revision · 원본 bytes · 메모리 그대로', async (_, corrupt, path) => {
+    const broken = legacyData();
+    corrupt(broken);
+    expect(() => migrateV1ToV2(broken)).toThrow(StoredDataError);
+    expect(() => migrateV1ToV2(broken)).toThrow(path);
+    expect(migrateAppData(1, broken)).toEqual({ status: 'failed', version: 1 });
+    await expectBlockedUnchanged(await legacyStore(corrupt), 'migration_failed');
+  });
 
+  it('변환 결과가 현재 버전 검증을 통과하지 못하면(확인 필요로 바뀌는 항목에 해결 시각) 저장하지 않는다', async () => {
+    const withResolvedAt = (data: LegacyData) => void (data.issues.find((issue) => issue.id === 'issue-q-login-limit')!.resolvedAt = '2026-09-01T00:00:00.000Z');
+    const broken = legacyData();
+    withResolvedAt(broken);
+    expect(() => migrateV1ToV2(broken)).toThrow('resolvedAt');
+    await expectBlockedUnchanged(await legacyStore(withResolvedAt), 'migration_failed');
+  });
+
+  it('모르는 필드가 있다는 이유만으로는 실패하지 않고, 그 필드를 그대로 남긴다', () => {
+    const legacy = legacyData();
+    legacy.issues[0].customerMemo = '고객사 메모';
+    legacy.results[0].extraColumn = 'x';
+    const migrated = migrateV1ToV2(legacy) as unknown as LegacyData;
+    expect(migrated.issues[0].customerMemo).toBe('고객사 메모');
+    expect(migrated.results[0].extraColumn).toBe('x');
+  });
+
+  it('schemaVersion이 2라도 실제 데이터가 v1 모양이면 현재 버전으로 읽지 않는다(corrupt)', async () => {
+    await expectBlockedUnchanged(await legacyStore(() => {}, CURRENT_SCHEMA_VERSION), 'corrupt');
+    const v2 = migrateV1ToV2(legacyData()) as AppData;
+    expect(migrateAppData(CURRENT_SCHEMA_VERSION, v2)).toMatchObject({ status: 'current' });
+    const resultWithLegacyLink = structuredClone(v2) as unknown as LegacyData;
+    resultWithLegacyLink.results[0].issueId = 'issue-bug-014';
+    expect(migrateAppData(CURRENT_SCHEMA_VERSION, resultWithLegacyLink)).toEqual({ status: 'corrupt' });
+    const legacyStatus = structuredClone(v2) as unknown as LegacyData;
+    legacyStatus.issues[0].status = 'waiting';
+    expect(migrateAppData(CURRENT_SCHEMA_VERSION, legacyStatus)).toEqual({ status: 'corrupt' });
+    const missingUpdatedAt = structuredClone(v2) as unknown as LegacyData;
+    delete missingUpdatedAt.issues[0].updatedAt;
+    expect(migrateAppData(CURRENT_SCHEMA_VERSION, missingUpdatedAt)).toEqual({ status: 'corrupt' });
+  });
+
+  it('입력을 바꾸지 않는다', () => {
     const frozen = deepFreeze(legacyV1State().data);
     expect(() => migrateV1ToV2(frozen)).not.toThrow();
     expect((frozen as { results: Record<string, unknown>[] }).results.some((result) => 'issueId' in result)).toBe(true);
+    expect(migrateAppData(1, { results: [] })).toEqual({ status: 'failed', version: 1 });
   });
 
   it('v1로 저장된 데이터를 열면 한 번 변환해 v2로 저장하고(revision +1), 다시 열면 그대로 읽는다', async () => {
@@ -140,14 +238,42 @@ describe('v1 → v2 변환(이슈 · 확인사항 추적)', () => {
     expect(saved.data.results).toEqual(withoutLegacyLink);
   });
 
-  it('변환에 실패하면 막고 v1 데이터를 그대로 둔다', async () => {
-    const legacy = legacyV1State();
-    (legacy.data as { issues: Record<string, unknown>[] }).issues[0].status = 'unknown';
-    const store = createMemoryStateStore(legacy);
-    const before = await storedState(store);
+  it('변환에 실패해 막힌 뒤 원인을 고치고 다시 불러오면 같은 탭에서 변환에 성공한다', async () => {
+    const store = await legacyStore((data) => void (data.issues[0].title = { text: '제목' }));
+    const repos = await expectBlockedUnchanged(store, 'migration_failed');
+
+    // 사용자가 다른 방법으로 v1 데이터를 고쳤다(같은 v1 형식, revision +1).
+    const fixed = legacyV1State(8);
+    await store.commit({ expectedRevision: 8, schemaVersion: 1, savedAt: fixed.savedAt, data: fixed.data as AppData });
+    await repos.persistence.load();
+    expect(ready(repos)).toMatchObject({ state: 'ready', revision: 10 });
+    expect(await storedState(store)).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 10 });
+    expect(await repos.issues.get('issue-bug-014')).toMatchObject({ resultId: FAIL_RESULT });
+    expect(store.inspect().artifactIds).toEqual(['src-legacy']);
+  });
+
+  it('변환한 v2를 저장하지 못하면 메모리에도 v2를 반영하지 않고(읽기 · 쓰기 모두 막힘), 실패가 사라지면 다시 불러와 변환한다', async () => {
+    const base = await legacyStore();
+    const { store, failNext } = failingOnce(base);
+    const before = base.inspect();
+    failNext();
     const repos = await openTab(store);
+
     expect(repos.persistence.getStatus()).toMatchObject({ state: 'blocked', reason: 'migration_failed' });
-    expect(await storedState(store)).toEqual(before);
+    expect(base.inspect()).toEqual(before);
+    expect((await storedState(base)).schemaVersion).toBe(1);
+    // 저장 전에 메모리를 먼저 바꾸는 회귀가 있으면 여기서 v2 데이터가 보인다.
+    expect(await repos.projects.list()).toEqual([]);
+    expect(await repos.issues.listByProject(PROJECT_A)).toEqual([]);
+    expect(await repos.testResults.listImports(PROJECT_A)).toEqual([]);
+    expect(await repos.issues.get('issue-bug-014')).toBeUndefined();
+    await expect(repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'x' })).rejects.toBeInstanceOf(PersistenceError);
+
+    await repos.persistence.load();
+    expect(ready(repos)).toMatchObject({ state: 'ready', revision: 9 });
+    expect(await storedState(base)).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 9 });
+    expect(await repos.issues.get('issue-bug-014')).toMatchObject({ status: 'open', resultId: FAIL_RESULT });
+    expect(await (await base.readArtifactBytes('src-legacy'))!.text()).toBe('v1 원본 bytes');
   });
 });
 
@@ -199,6 +325,72 @@ describe('이슈 · 확인사항 저장소', () => {
     await expect(repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT, testCaseId: 'tc-001' })).rejects.toThrow('다른 TC');
     await expect(repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: ' ' })).rejects.toThrow('제목');
     expect(await storedState(store)).toEqual(before);
+  });
+
+  describe('결과에서 만들 때 결과가 가리키는 TC의 프로젝트 경계', () => {
+    /** 예시 데이터에서 FAIL_RESULT의 testCaseId만 바꾼 저장소 */
+    async function withResultTestCase(testCaseId: string | undefined) {
+      const seed = createSeed();
+      const sample = seed.testCases.find((item) => item.projectId === PROJECT_A)!;
+      seed.testCases.push({ ...sample, id: 'tc-project-b', projectId: PROJECT_B, externalId: 'B-001' });
+      const result = seed.results.find((item) => item.id === FAIL_RESULT)!;
+      if (testCaseId === undefined) delete result.testCaseId;
+      else result.testCaseId = testCaseId;
+      seed.issues = seed.issues.filter((issue) => issue.resultId !== FAIL_RESULT);
+      const store = createMemoryStateStore();
+      return { store, repos: await openTab(store, { createInitialData: () => seed }) };
+    }
+
+    /** 거부되고 이슈 · 활동 · 저장 상태 · revision이 그대로다. */
+    async function expectRejected(store: StateStore, repos: Repositories, input: Parameters<Repositories['issues']['create']>[0], message: string) {
+      const before = await storedState(store);
+      const activities = await repos.activities.list();
+      const revision = ready(repos).revision;
+      await expect(repos.issues.create(input)).rejects.toThrow(message);
+      expect(await storedState(store)).toEqual(before);
+      expect(await repos.activities.list()).toEqual(activities);
+      expect(await repos.issues.listByProject(PROJECT_A)).toEqual(before.data.issues.filter((issue) => issue.projectId === PROJECT_A).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      expect(ready(repos).revision).toBe(revision);
+    }
+
+    it('결과의 TC가 같은 프로젝트에 있으면 만든다', async () => {
+      const { repos } = await withResultTestCase('tc-002');
+      expect(await repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT })).toMatchObject({ testCaseId: 'tc-002' });
+    });
+
+    it('결과의 TC가 다른 프로젝트에 있으면 거부한다', async () => {
+      const { store, repos } = await withResultTestCase('tc-project-b');
+      await expectRejected(store, repos, { projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT }, '이 프로젝트에 없는 TC');
+    });
+
+    it('결과의 TC가 없으면 거부한다', async () => {
+      const { store, repos } = await withResultTestCase('tc-missing');
+      await expectRejected(store, repos, { projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT }, '이 프로젝트에 없는 TC');
+    });
+
+    it('TC 미연결 결과는 TC 없이 연결하고, 입력으로 TC를 따로 붙이면 거부한다(고객사 TC ID로 추측하지 않음)', async () => {
+      const { store, repos } = await withResultTestCase(undefined);
+      await expectRejected(store, repos, { projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT, testCaseId: 'tc-002' }, '다른 TC');
+      const created = await repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: '미연결 결과', resultId: FAIL_RESULT });
+      expect(created).toMatchObject({ resultId: FAIL_RESULT });
+      expect(created).not.toHaveProperty('testCaseId');
+    });
+
+    it('resultId와 다른 입력 TC는 거부한다', async () => {
+      const { store, repos } = await withResultTestCase('tc-002');
+      await expectRejected(store, repos, { projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT, testCaseId: 'tc-001' }, '다른 TC');
+    });
+
+    it('저장에 실패해도 이슈 · 활동이 남지 않는다', async () => {
+      const { store: base, failNext } = failingOnce(createMemoryStateStore());
+      const repos = await openTab(base);
+      const before = await storedState(base);
+      const activities = await repos.activities.list();
+      failNext();
+      await expect(repos.issues.create({ projectId: PROJECT_A, type: 'defect', title: 'x', resultId: FAIL_RESULT })).rejects.toBeInstanceOf(PersistenceError);
+      expect(await storedState(base)).toEqual(before);
+      expect(await repos.activities.list()).toEqual(activities);
+    });
   });
 
   it('이슈를 만들고 고쳐도 수행 결과 · TC · 차수는 바뀌지 않는다', async () => {
