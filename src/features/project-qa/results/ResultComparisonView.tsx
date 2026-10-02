@@ -73,8 +73,11 @@ export function ResultComparisonView({ imports, resultsByImport, testCases, prev
   const [filter, setFilter] = useState<ComparisonFilter>('all');
   const [includeUnchanged, setIncludeUnchanged] = useState(false);
   // 비교하는 두 차수가 바뀌면(직접 고름 · 주소 이동 · 새 차수 자동 선택) 처음 100건부터 다시 보여 준다.
+  // 바뀐 차수로 저장된 값도 바로 덮어써야 A → B → A로 돌아왔을 때 A의 이전 건수가 되살아나지 않는다.
+  // (React의 "prop이 바뀔 때 state 조정" 방식: 이번 렌더를 버리고 바뀐 state로 곧바로 다시 그린다.)
   const pairKey = `${previous?.id}>${current?.id}`;
   const [paging, setPaging] = useState({ pairKey, limit: PAGE_SIZE });
+  if (paging.pairKey !== pairKey) setPaging({ pairKey, limit: PAGE_SIZE });
   const limit = paging.pairKey === pairKey ? paging.limit : PAGE_SIZE;
   const setLimit = (next: number) => setPaging({ pairKey, limit: next });
   const unchangedId = useId();
