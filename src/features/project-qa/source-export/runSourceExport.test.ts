@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { downloadFile, OBJECT_URL_REVOKE_DELAY_MS } from '@/lib/downloadFile';
 import { runSourceExport } from './runSourceExport';
 
-const okOutcome = { ok: true as const, fileName: '고객사_TC_Looma.xlsx', bytes: new Uint8Array([1, 2, 3]), changedCells: ['D4'], notices: ['신규 TC 1건'] };
+const okOutcome = { ok: true as const, fileName: '고객사_TC_Looma.xlsx', bytes: new Uint8Array([1, 2, 3]), changedCells: ['D4'], appendedRows: [], skipped: [], notices: ['신규 TC 1건'] };
 
 describe('내보내기 버튼 실행', () => {
   it('성공하면 내려받고 반영 셀 수를 알려 준다', async () => {
@@ -10,6 +10,20 @@ describe('내보내기 버튼 실행', () => {
     const state = await runSourceExport(async () => okOutcome, download);
     expect(download).toHaveBeenCalledWith(okOutcome.bytes, '고객사_TC_Looma.xlsx');
     expect(state).toEqual({ status: 'done', message: '고객사_TC_Looma.xlsx · 셀 1개에 현재 값을 반영했어요.', notices: ['신규 TC 1건'] });
+  });
+
+  it('신규 TC를 붙였거나 넣지 못한 TC가 있으면 기존 행 수정 · 신규 행 추가 · 불가 TC를 나눠 알려 준다', async () => {
+    const skipped = [{ entityId: 'tc-9', label: 'TC ID 없음 · 새 항목', reason: '고객사 TC ID가 없어요.' }];
+    const state = await runSourceExport(
+      async () => ({ ...okOutcome, changedCells: ['D4', 'F4', 'D5'], appendedRows: [{ rowNumber: 6, label: 'SIGN-010 · 새 항목' }], skipped }),
+      vi.fn(),
+    );
+    expect(state).toEqual({
+      status: 'done',
+      message: '고객사_TC_Looma.xlsx · 셀 3개에 현재 값을 반영 · 신규 TC 1건을 새 행으로 추가했어요.',
+      notices: ['신규 TC 1건'],
+      rows: { updatedRows: 2, appendedRows: 1, skipped },
+    });
   });
 
   it('검증 실패면 내려받지 않고 이유를 돌려준다', async () => {

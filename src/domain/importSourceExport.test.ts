@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planResultSourceExport, planTestAssetSourceExport, sourceExportFileName, SOURCE_EXPORT_UNAVAILABLE, verifySourceExportOutput, type SourceExportPlan } from './importSourceExport';
+import { planResultSourceExport, planTestAssetSourceExport, sourceExportFileName, SOURCE_EXPORT_UNAVAILABLE, verifySourceExportOutput, withoutAppends, type SourceExportPlan } from './importSourceExport';
 import type { ColumnMapping } from './testAssetImport';
 import type { ResultColumnMapping } from './testResultImport';
 import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession, TestCase, TestResult, TestResultImport } from './types';
@@ -299,5 +299,229 @@ describe('내보낸 파일 다시 읽기 확인', () => {
     // 표를 비교하는 단계를 지나도 결과의 뜻이 다르면 잡는다(계획 자체를 바꿔 확인한다).
     const tampered = { ...plan, patches: plan.patches.map((patch) => ({ ...patch, nextValue: 'F' })) };
     expect(verifySourceExportOutput(tampered, output('F'))).toEqual([expect.stringContaining('2행(SIGN-001): 내보낸 파일을 다시 읽은 결과가 지금 결과(PASS)와 달라요')]);
+  });
+});
+
+/* ---------- 신규 TC 새 행 계획 ---------- */
+
+/** Looma에서 만든 TC(가져온 파일과 연결되지 않음). 기본은 검토 완료 · 고객사 TC ID 있음 */
+const newCase = (id: string, overrides: Partial<TestCase> = {}): TestCase => ({
+  id,
+  projectId: 'p',
+  externalId: 'SIGN-010',
+  category: 'normal_flow',
+  feature: '회원가입',
+  depth: ['회원가입', '소셜'],
+  title: '카카오 가입',
+  precondition: '카카오 앱 설치',
+  steps: ['카카오로 시작을 누른다.', '동의한다.'],
+  expectedResult: '가입 완료',
+  requirementIds: [],
+  testConditionIds: [],
+  sourceRefs: [],
+  generationType: 'ai_suggestion',
+  origin: 'ai_generated',
+  status: 'reviewed',
+  revision: 1,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  ...overrides,
+});
+const APPEND = { appendNewTestCases: true, isLatestImport: true };
+const readyPlan = (plan: SourceExportPlan) => {
+  if (!plan.ok) throw new Error(plan.problems.join('\n'));
+  return plan;
+};
+const reasonsOf = (plan: SourceExportPlan) => readyPlan(plan).skipped.map(({ entityId, reason }) => `${entityId}: ${reason}`);
+
+describe('신규 TC 새 행 계획', () => {
+  it('요청하지 않으면 새 행을 만들지 않고 이전과 같은 안내만 남긴다', () => {
+    const plan = readyPlan(planTestAssetSourceExport(session(), artifact(), [importedCase(0), importedCase(1), newCase('tc-new')]));
+    expect(plan.appends).toEqual([]);
+    expect(plan.skipped).toEqual([]);
+    expect(plan.notices).toEqual(['이 파일의 행과 연결되지 않은 TC 1건(신규 TC 등)은 포함되지 않아요.']);
+  });
+
+  it('표 마지막 행 바로 아래부터 매핑한 열 순서대로 값을 정한다(매핑하지 않은 열은 빈 값)', () => {
+    const plan = readyPlan(planTestAssetSourceExport(session(), artifact(), [importedCase(0), importedCase(1), newCase('tc-new')], APPEND));
+    expect(plan.appends).toEqual([
+      { rowNumber: 5, entityId: 'tc-new', label: 'SIGN-010 · 카카오 가입', cells: ['SIGN-010', '회원가입', '소셜', '카카오 가입', '카카오 앱 설치', '1. 카카오로 시작을 누른다.\n2. 동의한다.', '가입 완료', ''] },
+    ]);
+    expect(plan.patches).toEqual([]);
+    expect(plan.notices).toEqual([]);
+  });
+
+  it('여러 신규 TC는 만든 순서대로 연속 행에 놓고, 기존 행 수정과 함께 계획한다', () => {
+    const plan = readyPlan(
+      planTestAssetSourceExport(
+        session(),
+        artifact(),
+        [
+          importedCase(0, { title: '이메일로 가입' }),
+          importedCase(1),
+          newCase('tc-b', { externalId: 'SIGN-012', title: '두 번째', createdAt: '2026-01-02T00:00:00.000Z' }),
+          newCase('tc-a', { externalId: 'SIGN-011', title: '첫 번째' }),
+        ],
+        APPEND,
+      ),
+    );
+    expect(plan.patches.map(({ rowNumber, field }) => `${rowNumber}:${field}`)).toEqual(['3:title']);
+    expect(plan.appends.map(({ rowNumber, entityId, cells }) => [rowNumber, entityId, cells[0], cells[3]])).toEqual([
+      [5, 'tc-a', 'SIGN-011', '첫 번째'],
+      [6, 'tc-b', 'SIGN-012', '두 번째'],
+    ]);
+  });
+
+  it('테스트 관점 열은 화면 라벨로, Depth · 기능 · Test Step은 가져오기와 같은 형식으로 쓴다', () => {
+    const headers = ['TC ID', '테스트 관점', '기능', '대분류', '중분류', '소분류', '테스트 항목', 'Test Step', 'Expected Result'];
+    const mapping: ColumnMapping = ['externalId', 'category', 'feature', 'depth1', 'depth2', 'depth3', 'title', 'steps', 'expectedResult'];
+    const rows = [['SIGN-001', '정상 흐름', '회원가입', '회원가입', '이메일', '형식', '이메일 가입', '1. 연다', '가입 완료']];
+    const plan = readyPlan(
+      planTestAssetSourceExport(
+        session({ sourceSnapshot: snapshot(rows, headers), columnMapping: mapping }),
+        artifact(),
+        [newCase('tc-new', { category: 'boundary', feature: '로그인', depth: ['로그인', '비밀번호', '길이'], steps: ['8자를 입력한다.'] })],
+        APPEND,
+      ),
+    );
+    expect(plan.appends[0].cells).toEqual(['SIGN-010', '경계값', '로그인', '로그인', '비밀번호', '길이', '카카오 가입', '1. 8자를 입력한다.', '가입 완료']);
+  });
+
+  it('고객사 TC ID 열이 있는데 TC ID가 없으면 번호를 만들거나 내부 ID를 쓰지 않고 넣지 않는다', () => {
+    const plan = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-internal-123', { externalId: undefined })], APPEND));
+    expect(plan.appends).toEqual([]);
+    expect(reasonsOf(plan)).toEqual([expect.stringContaining('tc-internal-123: 고객사 TC ID가 없어요. Looma는 고객사 TC ID를 만들지 않으므로')]);
+    expect(plan.skipped[0].label).toBe('TC ID 없음 · 카카오 가입');
+  });
+
+  it('고객사 TC ID 열이 없는 파일에는 TC ID 없는 TC도 넣고, 내부 ID는 어느 칸에도 쓰지 않는다', () => {
+    const headers = HEADERS.slice(1);
+    const mapping = MAPPING.slice(1);
+    const plan = readyPlan(
+      planTestAssetSourceExport(session({ sourceSnapshot: snapshot(ROWS.map((row) => row.slice(1)), headers), columnMapping: mapping }), artifact(), [newCase('tc-internal-123', { externalId: undefined })], APPEND),
+    );
+    expect(plan.appends).toHaveLength(1);
+    expect(plan.appends[0].cells.join('|')).not.toContain('tc-internal-123');
+    expect(plan.appends[0].cells[0]).toBe('회원가입');
+  });
+
+  it('검토를 마치지 않았거나 폐기 · 중복 표시된 TC는 넣지 않고 이유를 남긴다', () => {
+    const plan = readyPlan(
+      planTestAssetSourceExport(
+        session(),
+        artifact(),
+        [
+          newCase('tc-draft', { externalId: 'SIGN-020', status: 'draft' }),
+          newCase('tc-review', { externalId: 'SIGN-021', status: 'needs_review' }),
+          newCase('tc-old', { externalId: 'SIGN-022', status: 'deprecated' }),
+          newCase('tc-dup', { externalId: 'SIGN-023', duplicateOf: 'tc-1' }),
+          newCase('tc-active', { externalId: 'SIGN-024', status: 'active' }),
+        ],
+        APPEND,
+      ),
+    );
+    expect(plan.appends.map((append) => append.entityId)).toEqual(['tc-active']);
+    expect(reasonsOf(plan)).toEqual([
+      // 같은 시각에 만든 TC는 내부 ID 순서로 본다.
+      'tc-draft: 검토를 마치지 않은 TC예요(초안). 검토 완료 또는 사용 중으로 바꾼 뒤 다시 내보내 주세요.',
+      'tc-dup: 다른 TC의 중복으로 표시된 TC예요.',
+      'tc-old: 폐기된 TC예요.',
+      'tc-review: 검토를 마치지 않은 TC예요(재검토 필요). 검토 완료 또는 사용 중으로 바꾼 뒤 다시 내보내 주세요.',
+    ]);
+  });
+
+  it('원본 파일에 같은 고객사 TC ID · 같은 내용의 행이 있거나, 신규 TC끼리 ID · 내용이 겹치면 넣지 않는다', () => {
+    const sameAsRow3 = { externalId: undefined, feature: '회원가입', depth: ['회원가입', '이메일'], title: '이메일 가입', precondition: '앱 설치', steps: ['앱을 연다', '입력한다'], expectedResult: '가입 완료' };
+    const headers = HEADERS.slice(1);
+    const plan = readyPlan(
+      planTestAssetSourceExport(session({ sourceSnapshot: snapshot(ROWS.map((row) => row.slice(1)), headers), columnMapping: MAPPING.slice(1) }), artifact(), [newCase('tc-same', sameAsRow3), newCase('tc-x', { title: 'X' }), newCase('tc-y', { title: 'X' })], APPEND),
+    );
+    expect(plan.appends.map((append) => append.entityId)).toEqual(['tc-x']);
+    expect(reasonsOf(plan)).toEqual(['tc-same: 원본 파일 3행에 내용이 같은 행이 이미 있어요.', 'tc-y: 파일에 쓰일 내용이 다른 신규 TC(SIGN-010 · X)와 같아요.']);
+
+    const withIds = readyPlan(
+      planTestAssetSourceExport(session(), artifact(), [newCase('tc-a', { externalId: 'SIGN-002' }), newCase('tc-b', { externalId: 'SIGN-030' }), newCase('tc-c', { externalId: ' SIGN-030', title: '다른 항목' })], APPEND),
+    );
+    expect(withIds.appends).toEqual([]);
+    expect(reasonsOf(withIds)).toEqual([
+      'tc-a: 원본 파일 4행에 같은 고객사 TC ID(SIGN-002)가 이미 있어요.',
+      'tc-b: 프로젝트의 다른 TC와 고객사 TC ID(SIGN-030)가 같아요.',
+      'tc-c: 프로젝트의 다른 TC와 고객사 TC ID(SIGN-030)가 같아요.',
+    ]);
+    // 다른 가져오기 파일에 연결된 TC가 쓰는 고객사 TC ID도 쓰지 않는다.
+    const otherFile = readyPlan(
+      planTestAssetSourceExport(session(), artifact(), [newCase('tc-other', { externalId: 'SIGN-040', importSource: { sessionId: 'tai-9', rowNumber: 3 } }), newCase('tc-new', { externalId: 'SIGN-040' })], APPEND),
+    );
+    expect(reasonsOf(otherFile)).toEqual(['tc-new: 프로젝트의 다른 TC와 고객사 TC ID(SIGN-040)가 같아요.']);
+  });
+
+  it('원본 열 구조로 정확히 옮길 수 없거나 다시 가져올 수 없는 행이 되면 넣지 않는다', () => {
+    // 기능 열이 없으면 대분류 열이 기능을 담으므로 기능과 대분류가 다르면 옮길 수 없다.
+    const different = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-a', { feature: '로그인' })], APPEND));
+    expect(reasonsOf(different)).toEqual(['tc-a: 지금 TC 값을 원본 열 구조로 정확히 옮길 수 없어요. (feature)']);
+    const empty = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-b', { expectedResult: ' ' })], APPEND));
+    expect(reasonsOf(empty)[0]).toContain('다시 가져올 수 없는 행');
+    const control = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-c', { title: 'a\u0001b' })], APPEND));
+    expect(reasonsOf(control)[0]).toContain('제어 문자');
+  });
+
+  it('가장 최근 가져오기가 아니거나 표 마지막 행이 TC 행이 아니면 신규 TC 모두 넣지 않는다', () => {
+    const older = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-a')], { appendNewTestCases: true, isLatestImport: false }));
+    expect(reasonsOf(older)).toEqual([expect.stringContaining('tc-a: 이 프로젝트에 더 최근에 가져온 TC 파일이 있어요')]);
+    const trailing = readyPlan(planTestAssetSourceExport(session({ sourceSnapshot: snapshot([...ROWS, HEADERS.map(() => '')]) }), artifact(), [newCase('tc-a')], APPEND));
+    expect(reasonsOf(trailing)).toEqual(['tc-a: 원본 표의 마지막 행(5행)이 TC 행이 아니라(빈 칸 · 합계 · 메모 등) 새 행을 추가할 위치를 확정할 수 없어요.']);
+    // 합계처럼 TC가 아닌 행이 표 끝에 있으면 그 아래에 붙이지 않는다.
+    const total = readyPlan(planTestAssetSourceExport(session({ sourceSnapshot: snapshot([...ROWS, ['', '합계', '', '2건', '', '', '', '']]) }), artifact(), [newCase('tc-a')], APPEND));
+    expect(reasonsOf(total)).toEqual([expect.stringContaining('마지막 행(5행)이 TC 행이 아니라')]);
+  });
+
+  it('다른 가져오기 파일에 연결된 TC는 신규 TC로 보지 않는다', () => {
+    const plan = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-other', { importSource: { sessionId: 'tai-9', rowNumber: 3 } })], APPEND));
+    expect(plan.appends).toEqual([]);
+    expect(plan.skipped).toEqual([]);
+    expect(plan.notices).toEqual(['새 행으로 추가할 Looma 신규 TC(가져온 파일과 연결되지 않은 TC)가 없어요.', '다른 가져오기 파일의 행과 연결된 TC 1건은 포함되지 않아요.']);
+  });
+
+  it('입력 TC · 가져오기 기록을 바꾸지 않는다', () => {
+    const input = [importedCase(0, { title: '바뀜' }), newCase('tc-new')];
+    const record = session();
+    const before = JSON.stringify([input, record]);
+    planTestAssetSourceExport(record, artifact(), input, APPEND);
+    expect(JSON.stringify([input, record])).toBe(before);
+  });
+});
+
+describe('새 행을 붙인 파일 다시 읽기 확인', () => {
+  const plan = () => readyPlan(planTestAssetSourceExport(session(), artifact(), [importedCase(0), importedCase(1), newCase('tc-new')], APPEND));
+  const output = (edit: (rows: { rowNumber: number; cells: string[] }[]) => void = () => undefined) => {
+    const rows = ROWS.map((cells, index) => ({ rowNumber: index + 3, cells: [...cells] }));
+    rows.push({ rowNumber: 5, cells: [...plan().appends[0].cells] });
+    edit(rows);
+    return { headers: [...HEADERS], rows };
+  };
+
+  it('새 행이 계획대로 있으면 문제가 없다', () => {
+    expect(verifySourceExportOutput(plan(), output())).toEqual([]);
+  });
+
+  it('새 행이 없거나 값이 다르거나 다른 위치에 있으면 문제다', () => {
+    expect(verifySourceExportOutput(plan(), output((rows) => rows.pop()))[0]).toContain('행 구성');
+    expect(verifySourceExportOutput(plan(), output((rows) => (rows[2].cells[3] = '다른 항목')))).toEqual(['5행 테스트 항목: 새 행에 쓰인 값이 계획한 값과 달라요.']);
+    expect(verifySourceExportOutput(plan(), output((rows) => (rows[2].rowNumber = 6)))[0]).toContain('행 구성');
+  });
+
+  it('새 행을 다시 읽은 뜻이 지금 TC와 다르면 문제다(계획을 바꿔 확인한다)', () => {
+    const ready = plan();
+    const tampered = { ...ready, appends: ready.appends.map((append) => ({ ...append, cells: append.cells.map((cell, index) => (index === 3 ? '다른 항목' : cell)) })) };
+    const rows = ROWS.map((cells, index) => ({ rowNumber: index + 3, cells: [...cells] }));
+    rows.push({ rowNumber: 5, cells: [...tampered.appends[0].cells] });
+    expect(verifySourceExportOutput(tampered, { headers: [...HEADERS], rows })).toEqual([expect.stringContaining('5행(SIGN-010 · 카카오 가입): 새 행을 다시 읽은 값이 지금 TC와 달라요. (title)')]);
+  });
+
+  it('시트 구조 때문에 붙일 수 없으면 새 행을 이유와 함께 넣지 못한 TC로 옮긴다', () => {
+    const moved = withoutAppends(plan(), ['표가 있어요.', '병합이 있어요.']);
+    expect(moved.appends).toEqual([]);
+    expect(moved.skipped).toEqual([{ entityId: 'tc-new', label: 'SIGN-010 · 카카오 가입', reason: '표가 있어요. 병합이 있어요.' }]);
+    expect(verifySourceExportOutput(moved, { headers: [...HEADERS], rows: ROWS.map((cells, index) => ({ rowNumber: index + 3, cells: [...cells] })) })).toEqual([]);
   });
 });

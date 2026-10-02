@@ -5,7 +5,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
 import { parseXml, XML_LIMITS, XmlParseError } from './xml';
-import { columnLetters, patchXlsx, resolveWorksheet, type XlsxCellPatch, type XlsxSheetLayout } from './xlsxPatch';
+import { columnLetters, patchXlsx, resolveWorksheet, type XlsxCellPatch, type XlsxRowAppend, type XlsxSheetLayout } from './xlsxPatch';
 import { readZipDirectory, unzipPackage, ZIP_LIMITS } from './zipPackage';
 
 /* ---------- fixture ---------- */
@@ -491,5 +491,195 @@ describe('ZIP 패키지 방어', () => {
     expect(() => readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'c:root.xml'))).toThrow('지원하지 않는 항목 이름');
     // 첫 경로 조각이 아닌 곳의 콜론은 드라이브 경로가 아니다.
     expect(readZipDirectory(renameEntry(base, 'a/bb/c.xml', 'a/b:/c.xml')).map((entry) => entry.name)).toContain('a/b:/c.xml');
+  });
+});
+
+/* ---------- 신규 행 이어 붙이기 ---------- */
+
+/**
+ * openpyxl로 만든 단순 TC 시트(__fixtures__/make_append_fixtures.py). 헤더 A1:J1, TC 2~4행, 열마다 다른 스타일(s=2 · 3 · 4),
+ * 4행 높이 36, 틀 고정, 표지 시트에 TC 시트를 참조하는 수식이 있다. 변형 fixture는 표 · 자동 필터 · 병합 · 조건부 서식 · 데이터 유효성이 있다.
+ */
+const appendFixture = (name: string) => new Uint8Array(readFileSync(fileURLToPath(new URL(`./__fixtures__/${name}.xlsx`, import.meta.url))));
+const APPEND_SHEET = 'xl/worksheets/sheet2.xml';
+const APPEND_LAYOUT: XlsxSheetLayout = {
+  sheetName: 'TC',
+  headerRowNumber: 1,
+  headers: ['TC ID', '테스트 관점', '대분류', '중분류', '테스트 항목', 'Pre-condition', 'Test Step', 'Expected Result', '결과', '비고'],
+};
+const newRow = (rowNumber: number, values: string[]): XlsxRowAppend => ({ rowNumber, values, label: values[0] || '새 행' });
+const ROW_A = ['MEM-010', '정상 흐름', '회원가입', '소셜', '카카오 가입', '카카오 앱 설치', '1. 카카오로 시작을 누른다.\n2. 동의한다.', '가입 완료', '', ''];
+const ROW_B = ['MEM-011', '예외', '회원가입', '소셜', '카카오 취소', '', '1. 취소를 누른다.', '가입 화면 유지', '', ''];
+const ROW_C = ['MEM-012', '경계값', '회원가입', '비밀번호', '비밀번호 64자', '', '', '가입 진행', '', ''];
+
+/** 시트 XML만 고친 변형 패키지(나머지 파트는 fixture 그대로) */
+function withSheet(name: string, edit: (xml: string) => string): Uint8Array {
+  const files = unzipSync(appendFixture(name));
+  const before = strFromU8(files[APPEND_SHEET]);
+  const after = edit(before);
+  if (after === before) throw new Error('변형할 원문을 찾지 못했어요.');
+  files[APPEND_SHEET] = strToU8(after);
+  return zipSync(files);
+}
+const sheetXmlOf = (bytes: Uint8Array) => strFromU8(unzipSync(bytes)[APPEND_SHEET]);
+function blockedProblems(result: ReturnType<typeof patchXlsx>): string[] {
+  if (result.ok || !result.appendBlocked) throw new Error(`행 추가가 구조 문제로 막혀야 해요. ${JSON.stringify(result.ok ? result.appendedRows : result.problems)}`);
+  return result.problems;
+}
+function changedParts(a: Uint8Array, b: Uint8Array): string[] {
+  const before = entriesOf(a);
+  const after = entriesOf(b);
+  return Object.keys(before).filter((path) => !after[path] || !sameBytes(before[path], after[path]));
+}
+
+describe('신규 행 이어 붙이기', () => {
+  it('신규 행 1개를 마지막 TC 행 바로 아래에 붙이고, 시트 XML의 나머지 원문은 dimension만 빼고 그대로다', () => {
+    const original = appendFixture('append-base');
+    const before = sheetXmlOf(original);
+    const result = ok(patchXlsx(original, APPEND_LAYOUT, [], {}, [newRow(5, ROW_A)]));
+    expect(result.appendedRows).toEqual([5]);
+    expect(result.changedCells).toEqual([]);
+    expect(changedParts(original, result.bytes)).toEqual([APPEND_SHEET]);
+
+    const after = sheetXmlOf(result.bytes);
+    const inserted = after.slice(after.indexOf('<row r="5"'), after.indexOf('</sheetData>'));
+    // 새 행 · dimension만 다르다(열 너비 · 틀 고정 · 다른 행 · 여백 등은 원문 그대로).
+    expect(after.replace(inserted, '').replace('<dimension ref="A1:J5"/>', '<dimension ref="A1:J4"/>')).toBe(before);
+    expect(after).toContain('<dimension ref="A1:J5"/>');
+    // 인접한 4행의 행 속성(높이)과 열별 셀 스타일을 복제한다. 값이 빈 칸은 스타일만 있는 셀이다.
+    expect(inserted.startsWith('<row r="5" ht="36" customHeight="1">')).toBe(true);
+    expect([...inserted.matchAll(/<c r="([A-Z]+)5"( s="\d+")?/g)].map((match) => `${match[1]}${match[2] ?? ''}`)).toEqual([
+      'A s="2"',
+      'B s="2"',
+      'C s="2"',
+      'D s="2"',
+      'E s="2"',
+      'F s="2"',
+      'G s="2"',
+      'H s="2"',
+      'I s="3"',
+      'J s="4"',
+    ]);
+    expect(inserted).toContain('<c r="I5" s="3"/><c r="J5" s="4"/>');
+
+    // 다른 파서(SheetJS)로 다시 읽으면 열마다 계획한 값이 있다.
+    const values = sheetValues(result.bytes, 'TC');
+    ROW_A.forEach((value, index) => expect(values[`${columnLetters(index)}5`] ?? '', columnLetters(index)).toBe(value));
+    expect(values.A4).toBe('MEM-003');
+  });
+
+  it('신규 행 여러 개를 연속으로 붙이고 dimension을 마지막 새 행까지 넓힌다', () => {
+    const result = ok(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(5, ROW_A), newRow(6, ROW_B), newRow(7, ROW_C)]));
+    expect(result.appendedRows).toEqual([5, 6, 7]);
+    const xml = sheetXmlOf(result.bytes);
+    expect(xml).toContain('<dimension ref="A1:J7"/>');
+    expect([...xml.matchAll(/<row r="(\d+)"/g)].map((match) => Number(match[1]))).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    const values = sheetValues(result.bytes, 'TC');
+    expect([values.A5, values.A6, values.A7, values.E6, values.H7]).toEqual(['MEM-010', 'MEM-011', 'MEM-012', '카카오 취소', '가입 진행']);
+    // 빈 값은 셀 값을 만들지 않는다(F6 Pre-condition, G7 Test Step).
+    expect(values.F6 ?? '').toBe('');
+    expect(values.G7 ?? '').toBe('');
+    expect(xml).toContain('<c r="F6" s="2"/>');
+  });
+
+  it('기존 행 셀 수정과 새 행 추가를 한 번에 처리한다', () => {
+    const result = ok(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [patch(2, 4, '이메일 가입', '이메일로 가입')], {}, [newRow(5, ROW_A)]));
+    expect(result.changedCells).toEqual(['E2']);
+    expect(result.appendedRows).toEqual([5]);
+    const values = sheetValues(result.bytes, 'TC');
+    expect([values.E2, values.E5]).toEqual(['이메일로 가입', '카카오 가입']);
+  });
+
+  it('줄바꿈 · 한글 · 이모지 · XML 특수 문자 · 앞뒤 공백 · _xHHHH_ 모양 문자열을 그대로 쓴다', () => {
+    const tricky = ' <약관> & "동의" 😀\n2줄 _x0041_ ';
+    const result = ok(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(5, ['MEM-010', '', '', '', tricky, '', '', 'CRLF\r\n줄', '', ''])]));
+    const values = sheetValues(result.bytes, 'TC');
+    expect(values.E5).toBe(tricky);
+    expect(values.H5).toBe('CRLF\n줄');
+  });
+
+  it('표지 시트의 수식 · styles · workbook 등 다른 파트는 byte 단위로 그대로고 원본 bytes도 바꾸지 않는다', () => {
+    const original = appendFixture('append-base');
+    const copy = original.slice();
+    const result = ok(patchXlsx(original, APPEND_LAYOUT, [], {}, [newRow(5, ROW_A)]));
+    expect(sameBytes(original, copy)).toBe(true);
+    const before = entriesOf(original);
+    const after = entriesOf(result.bytes);
+    expect(Object.keys(after)).toEqual(Object.keys(before));
+    for (const path of Object.keys(before)) if (path !== APPEND_SHEET) expect(sameBytes(after[path], before[path]), path).toBe(true);
+    expect(strFromU8(after['xl/worksheets/sheet1.xml'])).toContain('<f>COUNTA(TC!A2:A100)</f>');
+  });
+
+  it('새 행까지 이미 덮는 데이터 유효성(I2:I1000)은 그대로 두고 행을 붙인다', () => {
+    const result = ok(patchXlsx(appendFixture('append-dv'), APPEND_LAYOUT, [], {}, [newRow(5, ROW_A)]));
+    expect(result.appendedRows).toEqual([5]);
+    expect(sheetXmlOf(result.bytes)).toContain('sqref="I2:I1000"');
+  });
+
+  const blockedFixtures: [string, string, string][] = [
+    ['Excel 표(tableParts)', 'append-table', 'tableParts'],
+    ['자동 필터(autoFilter)', 'append-autofilter', 'autoFilter'],
+    ['인접 행에 걸친 병합(J3:J4)', 'append-merged', '병합된 셀(J3:J4)'],
+    ['새 행을 덮지 않는 조건부 서식(I2:I4)', 'append-cf', '조건부 서식 범위(I2:I4)'],
+  ];
+  for (const [name, fixture, expected] of blockedFixtures) {
+    it(`행을 붙이지 않는다: ${name}`, () => {
+      expect(blockedProblems(patchXlsx(appendFixture(fixture), APPEND_LAYOUT, [], {}, [newRow(5, ROW_A)])).join('\n')).toContain(expected);
+    });
+  }
+
+  const blockedEdits: [string, (xml: string) => string, string][] = [
+    ['TC 목록 아래의 값 없는 서식 행', (xml) => xml.replace('</sheetData>', '<row r="6" ht="20" customHeight="1"/></sheetData>'), '다른 행(값 없는 서식 행 포함)'],
+    ['새 행 위치로 이어지는 병합', (xml) => xml.replace('<pageMargins', '<mergeCells count="1"><mergeCell ref="J4:J6"/></mergeCells><pageMargins'), '병합된 셀(J4:J6)'],
+    ['공유 수식', (xml) => xml.replace('</row><row r="3">', '<c r="K2"><f t="shared" ref="K2:K3" si="0">A2</f><v></v></c></row><row r="3">'), '공유 · 배열 수식'],
+    ['인접 행의 수식 셀', (xml) => xml.replace('<c r="J4" s="4" t="n"></c>', '<c r="J4" s="4"><f>I4</f><v></v></c>'), '수식 셀(J4)'],
+    ['숨긴 인접 행', (xml) => xml.replace('<row r="4" ht="36" customHeight="1">', '<row r="4" ht="36" customHeight="1" hidden="1">'), '숨김 또는 그룹'],
+    ['그림(drawing)', (xml) => xml.replace('</worksheet>', '<drawing xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId9"/></worksheet>'), 'drawing'],
+    ['확장 영역(extLst)', (xml) => xml.replace('</worksheet>', '<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}"/></extLst></worksheet>'), 'extLst'],
+    ['읽을 수 없는 dimension', (xml) => xml.replace('<dimension ref="A1:J4"/>', '<dimension ref="A1:J4:K9"/>'), 'dimension'],
+    ['읽을 수 없는 조건부 서식 범위', (xml) => xml.replace('<pageMargins', '<conditionalFormatting sqref="I2:"><cfRule type="expression" priority="1"><formula>TRUE</formula></cfRule></conditionalFormatting><pageMargins'), '조건부 서식 범위를 읽을 수 없어요'],
+    ['복제할 수 없는 셀 속성(cm)', (xml) => xml.replace('<c r="E4" s="2"', '<c r="E4" s="2" cm="1"'), '복제할 수 없는 속성(cm)'],
+  ];
+  for (const [name, edit, expected] of blockedEdits) {
+    it(`행을 붙이지 않는다: ${name}`, () => {
+      expect(blockedProblems(patchXlsx(withSheet('append-base', edit), APPEND_LAYOUT, [], {}, [newRow(5, ROW_A)])).join('\n')).toContain(expected);
+    });
+  }
+
+  it('열 전체 범위의 데이터 유효성(I:I)은 새 행을 덮으므로 행을 붙인다', () => {
+    const bytes = withSheet('append-base', (xml) => xml.replace('<pageMargins', '<dataValidations count="1"><dataValidation type="list" sqref="I:I"><formula1>"P,F"</formula1></dataValidation></dataValidations><pageMargins'));
+    expect(ok(patchXlsx(bytes, APPEND_LAYOUT, [], {}, [newRow(5, ROW_A)])).appendedRows).toEqual([5]);
+  });
+
+  it('새 행 위치가 마지막 TC 행 바로 아래가 아니면 붙이지 않는다', () => {
+    expect(blockedProblems(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(6, ROW_A)])).join('\n')).toContain('위치와 서식을 확정할 수 없어요');
+    expect(blockedProblems(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(4, ROW_A)])).join('\n')).toContain('위치를 확정할 수 없어요');
+    expect(blockedProblems(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(5, ROW_A), newRow(7, ROW_B)])).join('\n')).toContain('이어지지 않아요');
+  });
+
+  it('PR #24 fixture(병합 H4:H5 · 수식 J열)에는 행을 붙이지 않는다', () => {
+    const problems = blockedProblems(patchXlsx(richBytes(), TC_LAYOUT, [], {}, [newRow(6, ['signup-009', '회원가입', '새 항목', '', '', '결과', '', '', '', ''])])).join('\n');
+    expect(problems).toContain('수식 셀(J5)');
+    expect(problems).toContain('병합된 셀(H4:H5)');
+  });
+
+  it('기존 셀 patch 문제는 행 추가 문제보다 먼저 내보내기 전체를 멈춘다', () => {
+    const result = patchXlsx(appendFixture('append-table'), APPEND_LAYOUT, [patch(2, 4, '다른 값', 'x')], {}, [newRow(5, ROW_A)]);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.appendBlocked).toBeFalsy();
+    expect(problemsOf(result)[0]).toContain('셀 값이 가져올 때와 달라요');
+  });
+
+  it('새 행 값에 쓸 수 없는 제어 문자가 있거나 셀 글자 수 상한을 넘으면 구조 문제가 아니라 내보내기 전체를 멈춘다', () => {
+    const control = patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(5, ['MEM-010', '', '', '', 'a\u0001b', '', '', '', '', ''])]);
+    expect(!control.ok && control.appendBlocked).toBeFalsy();
+    expect(problemsOf(control)[0]).toContain('제어 문자');
+    const long = patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(5, ['MEM-010', '', '', '', 'a'.repeat(32768), '', '', '', '', ''])]);
+    expect(problemsOf(long)[0]).toContain('32767자');
+  });
+
+  it('별도 XML 검사기를 새 행을 붙인 시트에도 쓴다', () => {
+    const validateXml = vi.fn((_xml: string, part: string) => (part === 'patched worksheet' ? '검사기 거부' : undefined));
+    expect(problemsOf(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], { validateXml }, [newRow(5, ROW_A)]))[0]).toContain('검사기 거부');
   });
 });
