@@ -10,6 +10,7 @@ import type { AppData, StoredAppState } from '@/data/local/appData';
 import type { Repositories } from '@/data/repositories/types';
 import { PROJECT_A } from '@/data/mock/seed';
 import { analyzeTestAssetImport, defaultDecisionFor, parseImportRow, suggestColumnMapping, type ImportTable } from '@/domain/testAssetImport';
+import type { TestCase } from '@/domain/types';
 import { analyzeResultImport, defaultResultDecisionFor, type ResultColumnMapping } from '@/domain/testResultImport';
 import { nodeCrc32, rebuildZip } from '@/lib/ooxml/__fixtures__/zipBuilder';
 import { patchXlsx } from '@/lib/ooxml/xlsxPatch';
@@ -408,5 +409,330 @@ describe('최종 파일 확인 (계획한 변경이 있으면 바꾼 셀이 0개
     expect(!tc.ok && tc.problems.join(' ')).toContain('고객사 메모: 바꾸지 않은 칸의 값이 달라졌어요');
     const result = await exportResultSource(PROJECT_A, saved.id, { repos });
     expect(!result.ok && result.problems.join(' ')).toContain('바꾸지 않은 칸의 값이 달라졌어요');
+  });
+});
+
+/* ---------- 신규 TC 새 행 추가 (가져오기부터 다시 가져오기까지) ---------- */
+
+/** openpyxl로 만든 단순 TC 시트(src/lib/ooxml/__fixtures__/make_append_fixtures.py). TC ID MEM-001~003, 2~4행 */
+const appendFixtureBytes = (name: string) => new Uint8Array(readFileSync(fileURLToPath(new URL(`../../../lib/ooxml/__fixtures__/${name}.xlsx`, import.meta.url))));
+
+/** 예시 데이터 TC가 신규 TC 후보가 되지 않도록 이 프로젝트의 TC를 비운 뒤 fixture를 가져온다. */
+async function importAppendFixture(store: StateStore, repos: Repositories, name = 'append-base') {
+  await editState(store, repos, (data) => {
+    data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
+  });
+  return importTestAssets(repos, appendFixtureBytes(name));
+}
+
+const loomaCase = (id: string, overrides: Partial<TestCase>): TestCase => ({
+  id,
+  projectId: PROJECT_A,
+  category: 'exception',
+  feature: '회원가입',
+  depth: ['회원가입', '소셜'],
+  title: '카카오 가입 취소 & <확인>',
+  precondition: '카카오 앱 설치',
+  steps: ['카카오로 시작을 누른다.', '취소를 누른다.'],
+  expectedResult: '가입 화면 유지 😀',
+  requirementIds: [],
+  testConditionIds: [],
+  sourceRefs: [],
+  generationType: 'ai_suggestion',
+  origin: 'ai_generated',
+  status: 'reviewed',
+  revision: 1,
+  createdAt: '2026-09-01T00:00:00.000Z',
+  updatedAt: '2026-09-01T00:00:00.000Z',
+  ...overrides,
+});
+
+/** Looma에서 만든 TC 넷(TC ID 있는 둘 · TC ID 없는 하나 · 초안 하나)을 더하고, 가져온 2행 TC의 테스트 항목을 바꾼다. */
+async function addLoomaCases(store: StateStore, repos: Repositories, sessionId: string) {
+  await editState(store, repos, (data) => {
+    data.testCases.push(
+      loomaCase('tc-looma-1', { externalId: 'MEM-010' }),
+      loomaCase('tc-looma-2', { externalId: 'MEM-011', category: 'boundary', title: '닉네임 20자', precondition: undefined, steps: ['20자를 입력한다.'], expectedResult: '저장됨', status: 'active', createdAt: '2026-09-02T00:00:00.000Z' }),
+      loomaCase('tc-looma-no-id', { title: 'ID 없는 신규' }),
+      loomaCase('tc-looma-draft', { externalId: 'MEM-012', title: '초안', status: 'draft' }),
+    );
+    data.testCases.find((item) => item.importSource?.sessionId === sessionId && item.importSource.rowNumber === 2)!.title = '이메일로 가입';
+  });
+}
+
+describe('신규 TC 새 행 추가 내보내기', () => {
+  it('기존 행 수정과 신규 행 추가(TC ID 없는 TC 포함)를 한 파일에 하고, 다시 가져오면 모든 행이 지금 TC와 같다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { original, table, mapping, session } = await importAppendFixture(store, repos);
+    expect(mapping).toEqual(['externalId', 'category', 'depth1', 'depth2', 'title', 'precondition', 'steps', 'expectedResult', null, null]);
+    await addLoomaCases(store, repos, session.id);
+    const stateBefore = JSON.stringify(await store.read());
+
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true });
+    if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
+    expect(outcome.changedCells).toEqual(['E2']);
+    // 같은 시각에 만든 TC는 내부 ID 순서로 놓는다(tc-looma-1 → tc-looma-no-id → tc-looma-2).
+    expect(outcome.appendedRows).toEqual([
+      { rowNumber: 5, label: 'MEM-010 · 카카오 가입 취소 & <확인>' },
+      { rowNumber: 6, label: 'TC ID 없음 · ID 없는 신규' },
+      { rowNumber: 7, label: 'MEM-011 · 닉네임 20자' },
+    ]);
+    // 상태 정책은 그대로다: 초안은 넣지 않는다. TC ID가 없는 것은 넣지 못한 이유가 아니다.
+    expect(outcome.skipped.map(({ entityId }) => entityId)).toEqual(['tc-looma-draft']);
+    expect(outcome.skipped[0].reason).toContain('검토를 마치지 않은 TC예요(초안)');
+    expect(outcome.notices).toEqual(['고객사 TC ID가 없는 신규 TC 1건은 TC ID 칸을 비운 채 추가했어요. Looma는 고객사 TC ID를 만들지 않아요.']);
+    expect(changedEntries(original, outcome.bytes)).toEqual(['xl/worksheets/sheet2.xml']);
+    const sheetXml = strFromU8(unzipSync(outcome.bytes)['xl/worksheets/sheet2.xml']);
+    expect(sheetXml).toContain('<dimension ref="A1:J7"/>');
+    expect(sheetXml).toContain('<row r="5" ht="36" customHeight="1"><c r="A5" s="2" t="inlineStr">');
+    // TC ID 없는 행의 ID 칸은 값 없이 스타일만 있는 셀이다.
+    expect(sheetXml).toContain('<row r="6" ht="36" customHeight="1"><c r="A6" s="2"/><c r="B6" s="2" t="inlineStr">');
+    // 고객사 TC ID를 만들지 않았고 Looma 내부 ID는 어느 파트에도 쓰지 않았다.
+    const allParts = Object.values(unzipSync(outcome.bytes)).map((bytes) => strFromU8(bytes)).join('\n');
+    expect(allParts).not.toContain('tc-looma');
+    expect(allParts).not.toContain('MEM-012');
+
+    // 가져오기와 같은 reader로 다시 읽으면 기존 행은 바꾼 칸만 다르고 새 행은 열마다 TC 값이 있다.
+    const reread = (await readTable(outcome.bytes, 'TC')).table;
+    expect(reread.headers).toEqual(table.headers);
+    expect(reread.rows.map((row) => row.rowNumber)).toEqual([2, 3, 4, 5, 6, 7]);
+    expect(reread.rows[0].cells).toEqual(table.rows[0].cells.map((cell, index) => (index === 4 ? '이메일로 가입' : cell)));
+    expect(reread.rows.slice(1, 3)).toEqual(table.rows.slice(1, 3));
+    expect(reread.rows[3].cells).toEqual(['MEM-010', '예외', '회원가입', '소셜', '카카오 가입 취소 & <확인>', '카카오 앱 설치', '1. 카카오로 시작을 누른다.\n2. 취소를 누른다.', '가입 화면 유지 😀', '', '']);
+    expect(reread.rows[4].cells).toEqual(['', '예외', '회원가입', '소셜', 'ID 없는 신규', '카카오 앱 설치', '1. 카카오로 시작을 누른다.\n2. 취소를 누른다.', '가입 화면 유지 😀', '', '']);
+    expect(reread.rows[5].cells).toEqual(['MEM-011', '경계값', '회원가입', '소셜', '닉네임 20자', '', '1. 20자를 입력한다.', '저장됨', '', '']);
+
+    // 내보낸 파일을 다시 가져오면 오류 행 없이 기존 행 · 새 행 모두 지금 TC와 내용이 같다고 판정된다.
+    // TC ID 없는 행은 내용(기능 · 테스트 항목 · Pre-condition · Expected Result)으로 같은 TC를 찾는다.
+    const analysis = analyzeTestAssetImport(reread, mapping, await repos.testCases.listByProject(PROJECT_A));
+    expect(analysis.fileProblems).toEqual([]);
+    expect(analysis.rows.flatMap((item) => item.issues.filter((issue) => issue.level === 'error'))).toEqual([]);
+    expect(analysis.rows.map((item) => [item.row.rowNumber, item.kind, item.targetId?.startsWith('tc-looma') ? item.targetId : 'imported'])).toEqual([
+      [2, 'exact_match', 'imported'],
+      [3, 'exact_match', 'imported'],
+      [4, 'exact_match', 'imported'],
+      [5, 'exact_match', 'tc-looma-1'],
+      [6, 'exact_match', 'tc-looma-no-id'],
+      [7, 'exact_match', 'tc-looma-2'],
+    ]);
+
+    // 내보내기는 저장 상태 · 원본 bytes를 바꾸지 않는다.
+    expect(JSON.stringify(await store.read())).toBe(stateBefore);
+    expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
+  });
+
+  it('요청하지 않으면 신규 TC가 있어도 이전과 같이 기존 행만 다루고, 바뀐 값이 없으면 원본과 같은 파일이다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { original, session } = await importAppendFixture(store, repos);
+    await editState(store, repos, (data) => {
+      data.testCases.push(loomaCase('tc-looma-1', { externalId: 'MEM-010' }));
+    });
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos });
+    if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
+    expect(outcome).toMatchObject({ changedCells: [], appendedRows: [], skipped: [], notices: ['이 파일의 행과 연결되지 않은 TC 1건(신규 TC 등)은 포함되지 않아요.'] });
+    expect(outcome.bytes).toEqual(original);
+  });
+
+  it('Excel 표가 있는 시트는 기존 행만 고친 파일을 만들고, 신규 TC는 이유와 함께 넣지 않은 TC로 알린다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { session } = await importAppendFixture(store, repos, 'append-table');
+    await addLoomaCases(store, repos, session.id);
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true });
+    if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
+    expect(outcome.changedCells).toEqual(['E2']);
+    expect(outcome.appendedRows).toEqual([]);
+    // 붙이지 못했으므로 TC ID 칸을 비운 행 안내도 없다.
+    expect(outcome.notices).toEqual([]);
+    const blocked = outcome.skipped.filter((item) => item.entityId !== 'tc-looma-draft');
+    expect(blocked.map((item) => item.entityId)).toEqual(['tc-looma-1', 'tc-looma-no-id', 'tc-looma-2']);
+    for (const item of blocked) expect(item.reason).toContain('tableParts');
+    const reread = (await readTable(outcome.bytes, 'TC')).table;
+    expect(reread.rows.map((row) => row.rowNumber)).toEqual([2, 3, 4]);
+    expect(strFromU8(unzipSync(outcome.bytes)['xl/tables/table1.xml'])).toContain('ref="A1:J4"');
+  });
+
+  it('신규 TC는 사용자가 내보내기를 실행한 가져오기 파일에만 붙고, 더 이전 가져오기에서도 붙일 수 있다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    // 고객사 파일 둘: 먼저 가져온 A(append-base), 나중에 가져온 B(append-second)
+    const a = await importAppendFixture(store, repos);
+    const b = await importTestAssets(repos, appendFixtureBytes('append-second'));
+    await editState(store, repos, (data) => {
+      data.testCases.push(loomaCase('tc-looma-1', { externalId: 'MEM-010' }), loomaCase('tc-looma-no-id', { title: 'ID 없는 신규' }));
+    });
+    const stateBefore = JSON.stringify(await store.read());
+
+    // 더 이전에 가져온 A에서 직접 내보내면 A의 표 끝에 붙는다.
+    const fromA = await exportTestAssetSource(PROJECT_A, a.session.id, { repos, appendNewTestCases: true });
+    if (!fromA.ok) throw new Error(fromA.problems.join('\n'));
+    expect(fromA.appendedRows.map((row) => row.rowNumber)).toEqual([5, 6]);
+    expect(fromA.skipped).toEqual([]);
+    const rereadA = (await readTable(fromA.bytes, 'TC')).table;
+    expect(rereadA.rows.map((row) => row.cells[0])).toEqual(['MEM-001', 'MEM-002', 'MEM-003', 'MEM-010', '']);
+    expect(rereadA.rows.some((row) => row.cells[0].startsWith('ACC-'))).toBe(false);
+
+    // 선택하지 않은 B에는 자동으로 나누어 넣지 않는다. B의 원본과 B에서 옵션 없이 내보낸 파일은 그대로다.
+    expect(await repos.importSources.getBytes(b.session.artifactId!)).toEqual(b.original);
+    const fromBPlain = await exportTestAssetSource(PROJECT_A, b.session.id, { repos });
+    if (!fromBPlain.ok) throw new Error(fromBPlain.problems.join('\n'));
+    expect(fromBPlain.appendedRows).toEqual([]);
+    expect(fromBPlain.bytes).toEqual(b.original);
+
+    // B에서 사용자가 직접 켜고 내보내면 B의 표 끝에만 붙는다(A 원본은 그대로).
+    const fromB = await exportTestAssetSource(PROJECT_A, b.session.id, { repos, appendNewTestCases: true });
+    if (!fromB.ok) throw new Error(fromB.problems.join('\n'));
+    const rereadB = (await readTable(fromB.bytes, 'TC')).table;
+    expect(rereadB.rows.map((row) => row.cells[0])).toEqual(['ACC-001', 'ACC-002', 'ACC-003', 'MEM-010', '']);
+    expect(await repos.importSources.getBytes(a.session.artifactId!)).toEqual(a.original);
+    expect(JSON.stringify(await store.read())).toBe(stateBefore);
+  });
+
+  it('내보내기가 실패해도 저장된 TC · 가져오기 기록 · 원본 bytes는 그대로다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { original, session } = await importAppendFixture(store, repos);
+    await addLoomaCases(store, repos, session.id);
+    await editState(store, repos, (data) => {
+      // 원본 셀(E2)이 가져올 때 기록과 달라 기존 행 patch가 멈추는 상황
+      data.testAssetImports.find((item) => item.id === session.id)!.sourceSnapshot!.rows[0].cells[4] = '가져올 때와 다른 값';
+    });
+    const stateBefore = JSON.stringify(await store.read());
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true });
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.problems[0]).toContain('E2(테스트 항목): 셀 값이 가져올 때와 달라요');
+    expect(JSON.stringify(await store.read())).toBe(stateBefore);
+    expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
+  });
+
+  it('새 행을 다시 읽은 값이 계획과 다르면 파일을 내주지 않는다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    const { session } = await importAppendFixture(store, repos);
+    await editState(store, repos, (data) => {
+      data.testCases.push(loomaCase('tc-looma-1', { externalId: 'MEM-010' }));
+    });
+    // patcher가 새 행 값을 다르게 쓴 것처럼 바꿔, 다시 읽기 확인이 잡는지 본다.
+    patcherOverride.current = (bytes) => {
+      const files = unzipSync(bytes);
+      const xml = strFromU8(files['xl/worksheets/sheet2.xml']).replace('</sheetData>', '<row r="5"><c r="A5" t="inlineStr"><is><t>MEM-999</t></is></c></row></sheetData>');
+      files['xl/worksheets/sheet2.xml'] = strToU8(xml);
+      return { ok: true, bytes: zipSync(files), changedCells: [] };
+    };
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true });
+    expect(outcome.ok).toBe(false);
+    expect(!outcome.ok && outcome.problems.join(' ')).toContain('5행 TC ID: 새 행에 쓰인 값이 계획한 값과 달라요');
+  });
+});
+
+/* ---------- Codex 리뷰 M1 · M2 (실제 파일 → 기존 reader → 다시 가져오기 분석) ---------- */
+
+describe('신규 TC 새 행 추가 · 독립 리뷰 지적 회귀', () => {
+  it('M1: Pre-condition 열을 매핑하지 않은 파일에서는 파일에 쓰일 값으로 그 TC를 정확히 다시 찾을 수 있는 TC만 넣는다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    await editState(store, repos, (data) => {
+      data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
+    });
+    // append-base를 Pre-condition 열 없이(매핑하지 않고) 가져온다.
+    const original = appendFixtureBytes('append-base');
+    const { table, blob } = await readTable(original, 'TC');
+    const mapping = suggestColumnMapping(table.headers).map((field) => (field === 'precondition' ? null : field));
+    const analysis = analyzeTestAssetImport(table, mapping, []);
+    const decisions = analysis.rows.map((item) => ({ rowNumber: item.row.rowNumber, kind: item.kind, targetId: item.targetId, decision: defaultDecisionFor(item)! }));
+    const session = await repos.testAssetImports.apply({ projectId: PROJECT_A, fileName: FIXTURE_NAME, table, mapping, decisions, source: { bytes: blob, format: 'xlsx', sheetName: 'TC' } });
+
+    const login = (id: string, overrides: Partial<TestCase>) =>
+      loomaCase(id, { category: 'normal_flow', feature: '로그인', depth: ['로그인', '이메일'], title: '로그인 성공', precondition: undefined, steps: ['로그인한다.'], expectedResult: '홈 이동', ...overrides });
+    await editState(store, repos, (data) => {
+      data.testCases.push(
+        // Codex 재현: Pre-condition만 다른 TC ID 없는 TC 둘 → 파일에는 같은 행으로 쓰인다.
+        login('tc-pre-a', { precondition: '조건 A' }),
+        login('tc-pre-b', { precondition: '조건 B' }),
+        // 매핑한 열만으로 유일한 TC ID 없는 TC
+        login('tc-unique', { title: '로그인 실패', expectedResult: '오류 안내' }),
+        // 같은 내용이어도 TC ID가 있으면 ID로 구별된다.
+        login('tc-with-id', { externalId: 'MEM-020', precondition: '조건 A' }),
+      );
+    });
+    const stateBefore = JSON.stringify(await store.read());
+
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true });
+    if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
+    expect(outcome.appendedRows).toEqual([
+      { rowNumber: 5, label: 'TC ID 없음 · 로그인 실패' },
+      { rowNumber: 6, label: 'MEM-020 · 로그인 성공' },
+    ]);
+    expect(outcome.skipped.map(({ entityId, reason }) => [entityId, reason.includes('매핑한 열')])).toEqual([
+      ['tc-pre-a', true],
+      ['tc-pre-b', true],
+    ]);
+    const allParts = Object.values(unzipSync(outcome.bytes)).map((bytes) => strFromU8(bytes)).join('\n');
+    expect(allParts).not.toMatch(/tc-(pre|unique|with)/);
+
+    // 내보낸 파일 → 기존 reader → 다시 가져오기 분석: 붙인 행은 모두 그 TC와 exact_match, 오류 행 없음
+    const reread = (await readTable(outcome.bytes, 'TC')).table;
+    expect(reread.rows.slice(3).map((row) => [row.rowNumber, row.cells[0], row.cells[4], row.cells[5]])).toEqual([
+      [5, '', '로그인 실패', ''],
+      [6, 'MEM-020', '로그인 성공', ''],
+    ]);
+    const again = analyzeTestAssetImport(reread, mapping, await repos.testCases.listByProject(PROJECT_A));
+    expect(again.rows.flatMap((item) => item.issues.filter((issue) => issue.level === 'error'))).toEqual([]);
+    expect(again.rows.slice(3).map((item) => [item.row.rowNumber, item.kind, item.targetId])).toEqual([
+      [5, 'exact_match', 'tc-unique'],
+      [6, 'exact_match', 'tc-with-id'],
+    ]);
+    expect(JSON.stringify(await store.read())).toBe(stateBefore);
+    expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
+  });
+
+  it('M2: 마지막 TC 행이 1,048,576이면 신규 TC를 넣지 않고 기존 행 수정만 한 파일을 만들며, 화면 결과 수가 파일과 같다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    // append-base의 행을 내려 헤더 1,048,573행 · TC 1,048,574~1,048,576행으로 만든다.
+    const offset = 1048572;
+    const files = unzipSync(appendFixtureBytes('append-base'));
+    files['xl/worksheets/sheet2.xml'] = strToU8(
+      strFromU8(files['xl/worksheets/sheet2.xml'])
+        .replace(/<row r="(\d+)"/g, (_, row: string) => `<row r="${Number(row) + offset}"`)
+        .replace(/<c r="([A-Z]+)(\d+)"/g, (_, column: string, row: string) => `<c r="${column}${Number(row) + offset}"`)
+        .replace('<dimension ref="A1:J4"/>', `<dimension ref="A${1 + offset}:J${4 + offset}"/>`),
+    );
+    await editState(store, repos, (data) => {
+      data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
+    });
+    const { original, session } = await importTestAssets(repos, zipSync(files));
+    expect(session.sourceSnapshot!.rows.map((row) => row.rowNumber)).toEqual([1048574, 1048575, 1048576]);
+    await editState(store, repos, (data) => {
+      data.testCases.push(loomaCase('tc-looma-1', { externalId: 'MEM-010' }));
+      data.testCases.find((item) => item.importSource?.sessionId === session.id && item.importSource.rowNumber === 1048574)!.title = '이메일로 가입';
+    });
+
+    const download = vi.fn();
+    const state = await runSourceExport(() => exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true }), download);
+    expect(state).toEqual({
+      status: 'done',
+      message: '고객사_TC_Looma.xlsx · 셀 1개에 현재 값을 반영했어요.',
+      notices: [],
+      rows: {
+        updatedRows: 1,
+        appendedRows: 0,
+        skipped: [{ entityId: 'tc-looma-1', label: 'MEM-010 · 카카오 가입 취소 & <확인>', reason: '새 행(1048577~1048577행)이 Excel 시트의 최대 행(1,048,576행)을 넘어 추가할 수 없어요.' }],
+      },
+    });
+    // 내려받은 파일: 기존 행만 바뀌고, 최대 행을 넘는 행 · dimension은 없다.
+    const bytes: Uint8Array = download.mock.calls[0][0];
+    const sheetXml = strFromU8(unzipSync(bytes)['xl/worksheets/sheet2.xml']);
+    expect(sheetXml).toContain(`<dimension ref="A${1 + offset}:J${4 + offset}"/>`);
+    expect(sheetXml).not.toContain('1048577');
+    const reread = (await readTable(bytes, 'TC')).table;
+    expect(reread.rows.map((row) => [row.rowNumber, row.cells[4]])).toEqual([
+      [1048574, '이메일로 가입'],
+      [1048575, '약관 미동의 & <필수>'],
+      [1048576, '비밀번호 8자'],
+    ]);
+    expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
   });
 });

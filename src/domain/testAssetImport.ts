@@ -242,7 +242,8 @@ export interface TestAssetImportAnalysis {
   blankRows: number;
 }
 
-const compositeKey = (content: { feature?: string; title?: string; precondition?: string; expectedResult?: string }) =>
+/** 고객사 TC ID가 없을 때 같은 TC를 찾는 내용 기준. 원본 형식 내보내기도 ID 없는 새 행을 같은 기준으로 확인한다. */
+export const compositeKey = (content: { feature?: string; title?: string; precondition?: string; expectedResult?: string }) =>
   [content.feature, content.title, content.precondition, content.expectedResult].map(normalizeText).join('\u0000');
 
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item, index) => normalizeText(item) === normalizeText(b[index]));

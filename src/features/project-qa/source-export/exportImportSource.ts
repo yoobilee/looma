@@ -1,6 +1,15 @@
 import { repositories, type Repositories } from '@/data';
 import { PersistenceError } from '@/data/persistenceError';
-import { planResultSourceExport, planTestAssetSourceExport, sourceExportFileName, verifySourceExportOutput, type SourceExportPlan } from '@/domain/importSourceExport';
+import {
+  planResultSourceExport,
+  planTestAssetSourceExport,
+  sourceExportFileName,
+  verifySourceExportOutput,
+  withoutAppends,
+  type ReadySourceExportPlan,
+  type SourceExportPlan,
+  type SourceExportSkip,
+} from '@/domain/importSourceExport';
 import { toImportTable } from '@/domain/testAssetImport';
 import type { XmlValidator } from '@/lib/ooxml/xlsxPatch';
 import { openXlsxWorkbook } from '../imports/xlsxSheet';
@@ -12,11 +21,23 @@ import { openXlsxWorkbook } from '../imports/xlsxSheet';
  */
 
 export type SourceExportOutcome =
-  | { ok: true; fileName: string; bytes: Uint8Array; changedCells: string[]; notices: string[] }
+  | {
+      ok: true;
+      fileName: string;
+      bytes: Uint8Array;
+      changedCells: string[];
+      /** 표 끝에 붙인 새 행 */
+      appendedRows: { rowNumber: number; label: string }[];
+      /** 새 행으로 붙이려 했지만 넣지 않은 TC와 이유 */
+      skipped: SourceExportSkip[];
+      notices: string[];
+    }
   | { ok: false; problems: string[] };
 
 export interface SourceExportOptions {
   repos?: Repositories;
+  /** TC 내보내기에서 Looma에서 만든 TC를 표 끝에 새 행으로 붙인다. 기본은 기존 행만 고친다. */
+  appendNewTestCases?: boolean;
   /** 직접 만든 파서와 별도로 XML을 검사한다. 기본은 브라우저 DOMParser(있을 때). */
   validateXml?: XmlValidator;
 }
@@ -26,8 +47,9 @@ async function defaultValidator(): Promise<XmlValidator | undefined> {
   return createDomXmlValidator();
 }
 
-async function build(plan: SourceExportPlan, options: SourceExportOptions): Promise<SourceExportOutcome> {
-  if (!plan.ok) return plan;
+async function build(planned: SourceExportPlan, options: SourceExportOptions): Promise<SourceExportOutcome> {
+  if (!planned.ok) return planned;
+  let plan = planned;
   const repos = options.repos ?? repositories;
   let original: Uint8Array | undefined;
   try {
@@ -40,19 +62,21 @@ async function build(plan: SourceExportPlan, options: SourceExportOptions): Prom
   // ZIP 처리는 내보낼 때만 불러온다.
   const { patchXlsx } = await import('@/lib/ooxml/xlsxPatch');
   const validateXml = 'validateXml' in options ? options.validateXml : await defaultValidator();
-  const result = patchXlsx(
-    original,
-    plan.layout,
-    plan.patches.map((patch) => ({
-      rowNumber: patch.rowNumber,
-      columnIndex: patch.columnIndex,
-      previousValue: patch.previousValue,
-      nextValue: patch.nextValue,
-      label: patch.fieldLabel,
-    })),
-    { validateXml },
-  );
-  if (!result.ok) return result;
+  const cellPatches = plan.patches.map((patch) => ({
+    rowNumber: patch.rowNumber,
+    columnIndex: patch.columnIndex,
+    previousValue: patch.previousValue,
+    nextValue: patch.nextValue,
+    label: patch.fieldLabel,
+  }));
+  const rowAppends = (current: ReadySourceExportPlan) => current.appends.map((append) => ({ rowNumber: append.rowNumber, values: append.cells, label: append.label }));
+  let result = patchXlsx(original, plan.layout, cellPatches, { validateXml }, rowAppends(plan));
+  // 시트 구조 때문에 새 행만 붙일 수 없으면, 새 행 없이 기존 행만 고친 파일을 만들고 넣지 못한 TC와 이유를 알린다.
+  if (!result.ok && result.appendBlocked && plan.appends.length > 0) {
+    plan = withoutAppends(plan, result.problems);
+    result = patchXlsx(original, plan.layout, cellPatches, { validateXml }, rowAppends(plan));
+  }
+  if (!result.ok) return { ok: false, problems: result.problems };
 
   // 내려줄 bytes는 항상 가져오기와 같은 reader로 다시 읽어 실제 결과를 확인한다. 하나라도 다르면 파일을 내려주지 않는다.
   // 실제로 고친 셀 수(changedCells)로 확인을 건너뛰지 않는다. 계획한 변경이 있어도 patcher가 원본과 같다고 보고
@@ -65,7 +89,17 @@ async function build(plan: SourceExportPlan, options: SourceExportOptions): Prom
     problems = ['내보낸 파일을 다시 읽을 수 없어요.'];
   }
   if (problems.length > 0) return { ok: false, problems: ['내보낸 파일을 다시 읽어 확인했더니 기대와 달라 내려주지 않았어요.', ...problems] };
-  return { ok: true, fileName: sourceExportFileName(plan.fileName), bytes: result.bytes, changedCells: result.changedCells, notices: plan.notices };
+  // 실제로 붙인 행 기준으로 센다(시트 구조 때문에 붙이지 못했으면 세지 않는다).
+  const missingIds = plan.appends.filter((append) => append.missingExternalId).length;
+  return {
+    ok: true,
+    fileName: sourceExportFileName(plan.fileName),
+    bytes: result.bytes,
+    changedCells: result.changedCells,
+    appendedRows: plan.appends.map(({ rowNumber, label }) => ({ rowNumber, label })),
+    skipped: plan.skipped,
+    notices: missingIds > 0 ? [`고객사 TC ID가 없는 신규 TC ${missingIds}건은 TC ID 칸을 비운 채 추가했어요. Looma는 고객사 TC ID를 만들지 않아요.`, ...plan.notices] : plan.notices,
+  };
 }
 
 export async function exportTestAssetSource(projectId: string, sessionId: string, options: SourceExportOptions = {}): Promise<SourceExportOutcome> {
@@ -74,7 +108,8 @@ export async function exportTestAssetSource(projectId: string, sessionId: string
   if (!session) return { ok: false, problems: ['가져오기 기록을 찾을 수 없어요.'] };
   const artifact = session.artifactId ? await repos.importSources.get(session.artifactId) : undefined;
   const testCases = await repos.testCases.listByProject(projectId);
-  return build(planTestAssetSourceExport(session, artifact, testCases), options);
+  // 신규 TC를 붙일 파일은 사용자가 내보내기를 실행한 이 가져오기의 원본이다. 다른 가져오기 파일을 고르거나 나누지 않는다.
+  return build(planTestAssetSourceExport(session, artifact, testCases, { appendNewTestCases: options.appendNewTestCases }), options);
 }
 
 export async function exportResultSource(projectId: string, importId: string, options: SourceExportOptions = {}): Promise<SourceExportOutcome> {

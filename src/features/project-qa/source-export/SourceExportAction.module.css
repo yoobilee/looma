@@ -42,3 +42,73 @@
   padding-left: 18px;
   font-weight: 500;
 }
+
+.option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  min-width: 0;
+  font: var(--text-caption);
+  color: var(--color-ink);
+}
+
+.option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-sky);
+}
+
+.option label {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.option .notice {
+  grid-column: 2;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.counts div {
+  display: flex;
+  gap: 4px;
+}
+
+.counts dt {
+  color: var(--color-muted);
+}
+
+.counts dd {
+  margin: 0;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.counts .countWarning dt,
+.counts .countWarning dd {
+  color: var(--status-blocked);
+}
+
+.skipped summary {
+  color: var(--status-blocked);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.skipped ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+
+.skippedLabel {
+  font-weight: 700;
+  color: var(--color-ink);
+}

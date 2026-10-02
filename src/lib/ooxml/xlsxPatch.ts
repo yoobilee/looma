@@ -7,6 +7,9 @@ import { assertPackageContent, unzipPackage, zipPackage, ZipPackageError, type Z
  * 지원: 이미 있는 셀 · 문자열 셀(공유 문자열 · inline string) 또는 값이 없는 셀 · 병합 · 수식 범위 밖.
  * 지원하지 않는 구조(셀 없음, 숫자 · 날짜 · 논리 · 오류 셀, 서식 있는 텍스트, 병합, 수식 · 배열 · 공유 수식 범위,
  * 잘못되었거나 애매한 OOXML)는 추측하지 않고 내보내기 전체를 멈춘다. 부분 결과 파일은 만들지 않는다.
+ * 새 행은 "표 마지막 행 바로 아래에 이어 붙이기"만 한다(appends). 기존 행을 밀거나 참조를 다시 쓰지 않으므로,
+ * 행을 붙이면 의미가 달라지거나 함께 고쳐야 하는 구조(표 · 자동 필터 · 그림 · 병합 · 수식 범위 · 서식 범위 등)가 있으면
+ * 행을 붙이지 않고 이유를 돌려준다(appendBlocked). 그때도 기존 셀 patch 검사 결과는 바뀌지 않는다.
  * - 다른 파트(styles · theme · sharedStrings · 다른 시트 · 그림 · rels · workbook)는 내용 그대로 다시 묶는다.
  * - 워크시트 XML도 바꿀 셀의 원문 구간만 교체한다. 셀의 스타일(s)은 유지한다.
  */
@@ -38,6 +41,14 @@ export interface XlsxCellPatch {
   label: string;
 }
 
+/** 표 끝에 이어 붙일 새 행. values는 표의 열 순서(0부터)대로의 값이다. 빈 값은 셀 값을 비운다. */
+export interface XlsxRowAppend {
+  rowNumber: number;
+  values: string[];
+  /** 안내에 쓰는 이름 (예: TC ID · 테스트 항목) */
+  label: string;
+}
+
 export interface XlsxSheetLayout {
   sheetName: string;
   headerRowNumber: number;
@@ -52,13 +63,16 @@ export interface PatchOptions {
   validateXml?: XmlValidator;
 }
 
-export type XlsxPatchResult = { ok: true; bytes: Uint8Array; changedCells: string[] } | { ok: false; problems: string[] };
+/** appendBlocked: 기존 셀 patch에는 문제가 없고, 시트 구조 때문에 새 행만 붙일 수 없다. */
+export type XlsxPatchResult = { ok: true; bytes: Uint8Array; changedCells: string[]; appendedRows: number[] } | { ok: false; problems: string[]; appendBlocked?: boolean };
 
 class PatchProblems extends Error {
   constructor(readonly problems: string[]) {
     super(problems.join('\n'));
   }
 }
+/** 시트 구조 때문에 새 행을 붙일 수 없다. 기존 셀 patch 문제는 아니다. */
+class AppendBlocked extends PatchProblems {}
 const stop = (message: string): never => {
   throw new PatchProblems([message]);
 };
@@ -226,6 +240,19 @@ function parseRange(ref: string): Range | undefined {
 
 const inRange = (range: Range, row: number, column: number) => row >= range.top && row <= range.bottom && column >= range.left && column <= range.right;
 
+/** 조건부 서식 · 데이터 유효성의 sqref("A1:B2 D4", 열 전체 "I:I", 행 전체 "3:5"). 하나라도 읽을 수 없으면 undefined. */
+function parseSqref(sqref: string): Range[] | undefined {
+  const ranges: Range[] = [];
+  for (const ref of sqref.trim().split(/\s+/)) {
+    const columns = /^([A-Z]{1,3}):([A-Z]{1,3})$/.exec(ref);
+    const rows = /^([1-9][0-9]{0,6}):([1-9][0-9]{0,6})$/.exec(ref);
+    const range = columns ? parseRange(`${columns[1]}1:${columns[2]}${MAX_ROW}`) : rows ? parseRange(`A${rows[1]}:${columnLetters(MAX_COLUMN - 1)}${rows[2]}`) : parseRange(ref);
+    if (!range) return undefined;
+    ranges.push({ ...range, ref });
+  }
+  return ranges.length > 0 ? ranges : undefined;
+}
+
 /* ---------- 셀 값 ---------- */
 
 /** OOXML 문자열의 _xHHHH_ 표기를 푼다(Excel이 제어 문자를 저장하는 방식). */
@@ -324,16 +351,22 @@ interface Edit {
   text: string;
 }
 
+const qualifiedName = (element: XmlElement) => (local: string) => (element.prefix ? `${element.prefix}:${local}` : local);
+
+/** 문자열 셀 하나. attributesText는 앞에 공백을 둔 r · s 속성 원문이다. 값이 비면 값 없는 셀로 쓴다. */
+function stringCellXml(qualified: (local: string) => string, attributesText: string, value: string): string {
+  if (value === '') return `<${qualified('c')}${attributesText}/>`;
+  const text = escapeXmlText(encodeOoxmlEscapes(value));
+  return `<${qualified('c')}${attributesText} t="inlineStr"><${qualified('is')}><${qualified('t')} xml:space="preserve">${text}</${qualified('t')}></${qualified('is')}></${qualified('c')}>`;
+}
+
 function cellXml(cell: XmlElement, source: string, value: string): string {
-  const qualified = (local: string) => (cell.prefix ? `${cell.prefix}:${local}` : local);
   // 원래 속성 원문(r · s)을 그대로 쓰고 값 종류(t)만 바꾼다.
   const attributesText = cell.attributes
     .filter((item) => item.name !== 't')
     .map((item) => ` ${source.slice(item.rawStart, item.rawEnd)}`)
     .join('');
-  if (value === '') return `<${qualified('c')}${attributesText}/>`;
-  const text = escapeXmlText(encodeOoxmlEscapes(value));
-  return `<${qualified('c')}${attributesText} t="inlineStr"><${qualified('is')}><${qualified('t')} xml:space="preserve">${text}</${qualified('t')}></${qualified('is')}></${qualified('c')}>`;
+  return stringCellXml(qualifiedName(cell), attributesText, value);
 }
 
 interface SheetCell {
@@ -348,8 +381,11 @@ function readSheetStructure(worksheet: XmlElement, sheetName: string) {
   if (sheetDataList.length !== 1) stop(`'${sheetName}' 시트의 데이터 영역을 하나로 정할 수 없어요.`);
 
   const rows = new Map<number, Map<number, SheetCell>>();
+  const rowElements = new Map<number, XmlElement>();
   const formulaRanges: Range[] = [];
   const formulaCells = new Set<string>();
+  /** 여러 셀에 걸치는 수식(공유 · 배열 · 데이터 표)이 있는 셀 주소 */
+  const multiCellFormulas: string[] = [];
   let previousRow = 0;
   for (const row of childElements(sheetDataList[0])) {
     if (!isMain(row, 'row')) stop(`'${sheetName}' 시트 데이터에 알 수 없는 항목(${row.localName})이 있어요.`);
@@ -374,6 +410,8 @@ function readSheetStructure(worksheet: XmlElement, sheetName: string) {
       const formula = childElements(cell).find((child) => isMain(child, 'f'));
       if (formula) {
         formulaCells.add(ref!);
+        const formulaType = attribute(formula, 't');
+        if (formulaType !== undefined && formulaType !== 'normal') multiCellFormulas.push(ref!);
         const formulaRef = attribute(formula, 'ref');
         if (formulaRef !== undefined) {
           const range = parseRange(formulaRef);
@@ -383,6 +421,7 @@ function readSheetStructure(worksheet: XmlElement, sheetName: string) {
       }
     });
     rows.set(rowNumber, cells);
+    rowElements.set(rowNumber, row);
   }
 
   const mergeRanges: Range[] = [];
@@ -394,23 +433,178 @@ function readSheetStructure(worksheet: XmlElement, sheetName: string) {
       mergeRanges.push(range!);
     }
   }
-  return { rows, formulaRanges, formulaCells, mergeRanges };
+  return { rows, rowElements, sheetData: sheetDataList[0], formulaRanges, formulaCells, multiCellFormulas, mergeRanges };
+}
+
+type SheetStructure = ReturnType<typeof readSheetStructure>;
+
+/** Excel 셀 하나에 넣을 수 있는 최대 글자 수 */
+const MAX_CELL_TEXT = 32767;
+
+/**
+ * 행을 붙여도 되는 워크시트 하위 요소. 목록에 없는 요소(표 · 자동 필터 · 정렬 · 그림 · 컨트롤 · OLE · 보호 범위 ·
+ * 확장(extLst) · 알 수 없는 요소)가 있으면 행을 붙이지 않는다. 범위를 가진 요소는 함께 고쳐야 할 수 있기 때문이다.
+ */
+const APPEND_SAFE_SHEET_PARTS = new Set([
+  'sheetPr',
+  'dimension',
+  'sheetViews',
+  'sheetFormatPr',
+  'cols',
+  'sheetData',
+  'sheetCalcPr',
+  'sheetProtection',
+  'mergeCells',
+  'phoneticPr',
+  'conditionalFormatting',
+  'dataValidations',
+  'hyperlinks',
+  'printOptions',
+  'pageMargins',
+  'pageSetup',
+  'headerFooter',
+  'rowBreaks',
+  'colBreaks',
+  'ignoredErrors',
+  'legacyDrawing',
+  'legacyDrawingHF',
+  'picture',
+]);
+
+const isTrue = (value: string | undefined) => value === '1' || value === 'true';
+
+/**
+ * 표 마지막 행 바로 아래에 새 행을 이어 붙이는 편집을 만든다. 인접한 마지막 행의 행 속성 · 셀 스타일(s)을 복제한다.
+ * 안전하다고 확인할 수 없는 구조면 AppendBlocked를 던진다. 값 자체의 문제(쓸 수 없는 문자 등)는 PatchProblems다.
+ */
+function planAppend(source: string, worksheet: XmlElement, structure: SheetStructure, layout: XlsxSheetLayout, firstColumn: number, appends: XlsxRowAppend[]): Edit[] {
+  const sheet = `'${layout.sheetName}' 시트`;
+  const first = appends[0].rowNumber;
+  const lastNew = appends[appends.length - 1].rowNumber;
+  if (appends.some((item, index) => item.rowNumber !== first + index)) throw new AppendBlocked(['새 행 번호가 이어지지 않아요.']);
+  // 모든 새 행이 Excel 시트의 행 범위(1 ~ MAX_ROW) 안이어야 한다. 하나라도 넘으면 일부만 붙이지 않고 전부 붙이지 않는다.
+  if (!Number.isInteger(first) || first < 1 || lastNew > MAX_ROW) {
+    throw new AppendBlocked([`새 행(${first}~${lastNew}행)이 Excel 시트의 최대 행(${MAX_ROW.toLocaleString('ko-KR')}행)을 넘어 추가할 수 없어요.`]);
+  }
+
+  // 위치: 시트의 마지막 행(값 없는 서식 행 포함)이 새 행 바로 위의 TC 행이어야 한다.
+  const rowNumbers = [...structure.rows.keys()];
+  const lastRow = rowNumbers[rowNumbers.length - 1] ?? 0;
+  if (lastRow >= first) throw new AppendBlocked([`${sheet}의 TC 목록 아래(${first}행 이후)에 다른 행(값 없는 서식 행 포함)이 있어 새 행을 추가할 위치를 확정할 수 없어요.`]);
+  if (lastRow !== first - 1 || lastRow <= layout.headerRowNumber) throw new AppendBlocked([`${sheet}에서 새 행 바로 위의 TC 행(${first - 1}행)을 찾을 수 없어 위치와 서식을 확정할 수 없어요.`]);
+  const templateRow = structure.rowElements.get(lastRow)!;
+  const templateCells = structure.rows.get(lastRow)!;
+
+  const blocked: string[] = [];
+  const unsafeParts = childElements(worksheet)
+    .filter((child) => !MAIN_NS.includes(child.namespaceUri) || !APPEND_SAFE_SHEET_PARTS.has(child.localName))
+    .map((child) => child.localName);
+  if (unsafeParts.length > 0) {
+    blocked.push(`${sheet}에 행을 추가하면 함께 고쳐야 할 수 있는 구조(${[...new Set(unsafeParts)].join(', ')})가 있어요. Excel 표 · 자동 필터 · 그림 등이 있는 시트는 이번 버전에서 행을 추가하지 않아요.`);
+  }
+  if (isTrue(attribute(templateRow, 'hidden')) || isTrue(attribute(templateRow, 'collapsed')) || (attribute(templateRow, 'outlineLevel') ?? '0') !== '0') {
+    blocked.push(`인접한 ${lastRow}행이 숨김 또는 그룹(개요) 행이라 새 행의 표시 방식을 정할 수 없어요.`);
+  }
+  if (structure.multiCellFormulas.length > 0) blocked.push(`${sheet}에 공유 · 배열 수식(${structure.multiCellFormulas.slice(0, 3).join(', ')})이 있어요.`);
+  const templateFormulas = [...templateCells.values()].filter(({ cell }) => childElements(cell).some((child) => isMain(child, 'f'))).map(({ column }) => `${columnLetters(column)}${lastRow}`);
+  if (templateFormulas.length > 0) blocked.push(`인접한 ${lastRow}행에 수식 셀(${templateFormulas.join(', ')})이 있어 새 행에 같은 수식을 둘지 정할 수 없어요.`);
+  const formulaBelow = structure.formulaRanges.find((range) => range.bottom >= lastRow);
+  if (formulaBelow) blocked.push(`수식 결과 범위(${formulaBelow.ref})가 인접한 ${lastRow}행 또는 새 행 위치에 걸쳐 있어요.`);
+  const mergeBelow = structure.mergeRanges.find((range) => range.bottom >= lastRow);
+  if (mergeBelow) blocked.push(`병합된 셀(${mergeBelow.ref})이 인접한 ${lastRow}행 또는 새 행 위치에 걸쳐 있어요.`);
+
+  // 조건부 서식 · 데이터 유효성이 인접 행이나 새 행 위치에 걸쳐 있으면 새 행까지 이미 덮고 있어야 한다(범위를 넓히지 않는다).
+  const rangedParts = [...mainChildren(worksheet, 'conditionalFormatting'), ...mainChildren(worksheet, 'dataValidations').flatMap((group) => childElements(group))];
+  for (const part of rangedParts) {
+    const label = part.localName === 'conditionalFormatting' ? '조건부 서식' : '데이터 유효성';
+    const sqref = attribute(part, 'sqref');
+    const ranges = sqref === undefined ? undefined : parseSqref(sqref);
+    if (!ranges) {
+      blocked.push(`${label} 범위를 읽을 수 없어요.`);
+      continue;
+    }
+    const uncovered = ranges.find((range) => !(range.bottom < lastRow || range.top > lastNew || (range.top <= lastRow && range.bottom >= lastNew)));
+    if (uncovered) blocked.push(`${label} 범위(${uncovered.ref})가 새 행(${first}~${lastNew}행)까지 이어지지 않아 새 행의 서식 · 입력 규칙이 인접 행과 달라져요.`);
+  }
+
+  const columns = layout.headers.map((_, index) => firstColumn + index);
+  for (const column of columns) {
+    const unknown = templateCells.get(column)?.cell.attributes.find((item) => !ALLOWED_CELL_ATTRIBUTES.has(item.name));
+    if (unknown) blocked.push(`인접한 ${columnLetters(column)}${lastRow} 셀에 복제할 수 없는 속성(${unknown.name})이 있어요.`);
+  }
+
+  const dimensions = mainChildren(worksheet, 'dimension');
+  const dimensionRef = dimensions.length === 1 ? attribute(dimensions[0], 'ref') : undefined;
+  const dimension = dimensionRef === undefined ? undefined : parseRange(dimensionRef);
+  if (dimensions.length > 1 || (dimensions.length === 1 && !dimension)) blocked.push(`${sheet}의 사용 범위(dimension)를 읽을 수 없어 새 행에 맞게 고칠 수 없어요.`);
+
+  if (blocked.length > 0) throw new AppendBlocked(blocked);
+
+  // 값 자체의 문제는 구조 문제가 아니므로 내보내기 전체를 멈춘다(계획 단계에서 미리 거르므로 정상 흐름에서는 생기지 않는다).
+  const problems: string[] = [];
+  const qualified = qualifiedName(templateRow);
+  // 행 번호(r)와 셀 범위 힌트(spans)만 빼고 인접 행의 행 속성(높이 · 행 스타일 등)을 그대로 쓴다.
+  const rowAttributes = templateRow.attributes
+    .filter((item) => item.name !== 'r' && item.name !== 'spans')
+    .map((item) => ` ${source.slice(item.rawStart, item.rawEnd)}`)
+    .join('');
+  const rowsXml = appends
+    .map((append) => {
+      const cellsXml = columns
+        .map((column, index) => {
+          const ref = `${columnLetters(column)}${append.rowNumber}`;
+          const value = normalizeNewlines(append.values[index] ?? '');
+          if (!isXmlSafeText(value)) problems.push(`${ref}(${append.label}): 파일에 쓸 수 없는 제어 문자가 있어요.`);
+          if (value.length > MAX_CELL_TEXT) problems.push(`${ref}(${append.label}): 셀 하나에 넣을 수 있는 글자 수(${MAX_CELL_TEXT}자)를 넘어요.`);
+          // 인접 행 같은 열 셀의 스타일(s)만 복제한다. 그 셀이 없고 값도 없으면 셀을 만들지 않는다.
+          const style = templateCells.get(column)?.cell.attributes.find((item) => item.name === 's');
+          if (value === '' && !style) return '';
+          return stringCellXml(qualified, ` r="${ref}"${style ? ` ${source.slice(style.rawStart, style.rawEnd)}` : ''}`, value);
+        })
+        .join('');
+      return `<${qualified('row')} r="${append.rowNumber}"${rowAttributes}>${cellsXml}</${qualified('row')}>`;
+    })
+    .join('');
+  if (problems.length > 0) throw new PatchProblems(problems);
+
+  const edits: Edit[] = [{ start: structure.sheetData.closeStart, end: structure.sheetData.closeStart, text: rowsXml }];
+  if (dimension) {
+    const refAttribute = dimensions[0].attributes.find((item) => item.name === 'ref')!;
+    const top = Math.min(dimension.top, first);
+    const left = Math.min(dimension.left, columns[0]);
+    const right = Math.max(dimension.right, columns[columns.length - 1]);
+    const bottom = Math.max(dimension.bottom, lastNew);
+    edits.push({ start: refAttribute.rawStart, end: refAttribute.rawEnd, text: `ref="${columnLetters(left)}${top}:${columnLetters(right)}${bottom}"` });
+  }
+  return edits;
 }
 
 export interface PatchWorksheetResult {
   xml: string;
   changedCells: string[];
+  appendedRows: number[];
 }
 
-/** 워크시트 XML에 셀 값을 반영한다. 문제가 하나라도 있으면 PatchProblems를 던진다. */
-export function patchWorksheetXml(source: string, layout: XlsxSheetLayout, patches: XlsxCellPatch[], sharedStrings: () => SharedString[], options: PatchOptions = {}): PatchWorksheetResult {
+/**
+ * 워크시트 XML에 셀 값을 반영하고 새 행을 이어 붙인다. 문제가 하나라도 있으면 PatchProblems를 던진다.
+ * 기존 셀 patch에는 문제가 없고 새 행만 붙일 수 없으면 AppendBlocked를 던진다.
+ */
+export function patchWorksheetXml(
+  source: string,
+  layout: XlsxSheetLayout,
+  patches: XlsxCellPatch[],
+  sharedStrings: () => SharedString[],
+  options: PatchOptions = {},
+  appends: XlsxRowAppend[] = [],
+): PatchWorksheetResult {
   let worksheet: XmlElement;
   try {
     worksheet = parseXml(source);
   } catch (error) {
     return stop(`'${layout.sheetName}' 시트 XML을 읽을 수 없어요. ${error instanceof Error ? error.message : ''}`.trim());
   }
-  const { rows, formulaRanges, formulaCells, mergeRanges } = readSheetStructure(worksheet, layout.sheetName);
+  const structure = readSheetStructure(worksheet, layout.sheetName);
+  const { rows, formulaRanges, formulaCells, mergeRanges } = structure;
 
   // 가져올 때(SheetJS)처럼 값이 있는 셀 중 가장 왼쪽 열을 표의 첫 열로 본다.
   let firstColumn = Number.POSITIVE_INFINITY;
@@ -482,6 +676,7 @@ export function patchWorksheetXml(source: string, layout: XlsxSheetLayout, patch
   }
 
   if (problems.length > 0) throw new PatchProblems(problems);
+  if (appends.length > 0) edits.push(...planAppend(source, worksheet, structure, layout, firstColumn, appends));
 
   let xml = source;
   for (const edit of edits.sort((a, b) => b.start - a.start)) xml = xml.slice(0, edit.start) + edit.text + xml.slice(edit.end);
@@ -494,26 +689,26 @@ export function patchWorksheetXml(source: string, layout: XlsxSheetLayout, patch
   }
   const problem = options.validateXml?.(xml, 'patched worksheet');
   if (problem) stop(`고친 시트 XML이 올바르지 않아 내보내기를 멈췄어요. ${problem}`);
-  return { xml, changedCells: changedCells.sort() };
+  return { xml, changedCells: changedCells.sort(), appendedRows: appends.map((append) => append.rowNumber) };
 }
 
 /**
- * 원본 XLSX bytes에 셀 값을 반영한 새 XLSX bytes를 만든다. 원본 bytes는 바꾸지 않는다.
- * 실제로 고친 셀이 없으면 원본 bytes를 그대로(복사본으로) 돌려준다. changedCells가 비어 있어도
+ * 원본 XLSX bytes에 셀 값을 반영하고 새 행을 이어 붙인 새 XLSX bytes를 만든다. 원본 bytes는 바꾸지 않는다.
+ * 실제로 고친 셀 · 붙인 행이 없으면 원본 bytes를 그대로(복사본으로) 돌려준다. changedCells가 비어 있어도
  * 계획한 값이 파일에 들어갔다는 뜻은 아니므로, 호출하는 쪽은 결과 bytes를 다시 읽어 확인해야 한다.
  */
-export function patchXlsx(original: Uint8Array, layout: XlsxSheetLayout, patches: XlsxCellPatch[], options: PatchOptions = {}): XlsxPatchResult {
+export function patchXlsx(original: Uint8Array, layout: XlsxSheetLayout, patches: XlsxCellPatch[], options: PatchOptions = {}, appends: XlsxRowAppend[] = []): XlsxPatchResult {
   try {
     // 바꿀 셀이 없어도 원본 패키지가 정상적인 classic ZIP인지 먼저 확인한다(원본을 그대로 내줄 때도 같다).
     const pkg = unzipPackage(original);
-    if (patches.length === 0) return { ok: true, bytes: original.slice(), changedCells: [] };
+    if (patches.length === 0 && appends.length === 0) return { ok: true, bytes: original.slice(), changedCells: [], appendedRows: [] };
     const resolved = resolveWorksheet(pkg, layout.sheetName, options);
     const worksheet = readPart(pkg, resolved.worksheetPath, options, XLSX_PART_LIMITS.worksheetBytes);
     let shared: SharedString[] | undefined;
     const sharedStrings = () =>
       (shared ??= readSharedStrings(resolved.sharedStringsPath ? readPart(pkg, resolved.sharedStringsPath, options, XLSX_PART_LIMITS.sharedStringsBytes).root : undefined));
-    const { xml, changedCells } = patchWorksheetXml(worksheet.text, layout, patches, sharedStrings, options);
-    if (changedCells.length === 0) return { ok: true, bytes: original.slice(), changedCells };
+    const { xml, changedCells, appendedRows } = patchWorksheetXml(worksheet.text, layout, patches, sharedStrings, options, appends);
+    if (changedCells.length === 0 && appendedRows.length === 0) return { ok: true, bytes: original.slice(), changedCells, appendedRows };
 
     const encoded = strToU8(xml);
     const entries = new Map(pkg.entries);
@@ -522,8 +717,9 @@ export function patchXlsx(original: Uint8Array, layout: XlsxSheetLayout, patches
     const bytes = zipPackage(patched);
     // 다시 묶은 파일을 같은 엄격한 reader로 열어, 고친 시트 말고 모든 파트가 원본 내용과 byte 단위로 같은지 확인한다.
     assertPackageContent(bytes, patched);
-    return { ok: true, bytes, changedCells };
+    return { ok: true, bytes, changedCells, appendedRows };
   } catch (error) {
+    if (error instanceof AppendBlocked) return { ok: false, problems: error.problems, appendBlocked: true };
     if (error instanceof PatchProblems) return { ok: false, problems: error.problems };
     if (error instanceof ZipPackageError) return { ok: false, problems: [error.message] };
     throw error;
