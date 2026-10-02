@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Upload } from 'lucide-react';
+import { ArrowLeft, GitCompareArrows, Upload } from 'lucide-react';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
 import {
   attentionAreas,
@@ -16,13 +16,14 @@ import { summarizeResultImport } from '@/domain/testResultImport';
 import { executionTypeLabel, platformLabel, testResultLabel, testResultOrder } from '@/domain/labels';
 import type { TestResult, TestResultImport } from '@/domain/types';
 import { formatMonthDay } from '@/lib/date';
-import { Button } from '@/components/ui/Button';
+import { Button, ButtonLink } from '@/components/ui/Button';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { ResultTag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
 import { ResultLegend, ResultStackedBar } from './ResultStackedBar';
+import { ResultComparisonView } from './ResultComparisonView';
 import { ResultImportDialog } from './ResultImportDialog';
 import styles from './ResultDashboardTab.module.css';
 
@@ -56,7 +57,7 @@ function groupRetests(results: TestResult[]) {
 export function ResultDashboardTab() {
   const { project } = useProjectContext();
   // 가져오기 이력에서 `?import=<id>`로 들어오면 그 차수를 먼저 보여 준다. 없는 id면 기존처럼 최신 차수다.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedImportId, setSelectedImportId] = useState<string | null>(searchParams.get('import'));
   const [uploadOpen, setUploadOpen] = useState(false);
   const [showAllRetests, setShowAllRetests] = useState(false);
@@ -122,6 +123,33 @@ export function ResultDashboardTab() {
     );
   }
 
+  // `?view=compare`: 두 차수를 TC별로 비교하는 화면. 주소(base · target)가 고른 차수의 유일한 기준이다.
+  // 사용자가 고르면 주소에 남겨 새로 고쳐도 · 새 차수를 가져와도 유지하고, 주소에 없으면 가장 큰 두 차수를 자동으로 고른다.
+  if (searchParams.get('view') === 'compare') {
+    return (
+      <div className={styles.page}>
+        <div className={styles.toolbar}>
+          <ButtonLink size="sm" variant="ghost" icon={<ArrowLeft aria-hidden />} to="?">
+            결과 요약으로
+          </ButtonLink>
+          <h2 className={styles.viewTitle}>수행 결과 비교</h2>
+          <Button variant="primary" icon={<Upload aria-hidden />} onClick={() => setUploadOpen(true)}>
+            수행 결과 업로드
+          </Button>
+        </div>
+        <ResultComparisonView
+          imports={imports}
+          resultsByImport={resultsByImport}
+          testCases={testCases}
+          previousId={searchParams.get('base')}
+          currentId={searchParams.get('target')}
+          onSelectionChange={(base, target) => setSearchParams({ view: 'compare', base, target }, { replace: true })}
+        />
+        {uploadDialog}
+      </div>
+    );
+  }
+
   const current = imports.find((item) => item.id === selectedImportId) ?? imports[imports.length - 1];
   const currentIndex = imports.indexOf(current);
   const previous = currentIndex > 0 ? imports[currentIndex - 1] : undefined;
@@ -159,6 +187,9 @@ export function ResultDashboardTab() {
             .join(' · ')}
           {summary.unlinked > 0 && <span className={styles.unlinked}> · 미연결 {summary.unlinked}건</span>}
         </p>
+        <ButtonLink variant="secondary" icon={<GitCompareArrows aria-hidden />} to="?view=compare">
+          수행 결과 비교
+        </ButtonLink>
         <Button variant="primary" icon={<Upload aria-hidden />} onClick={() => setUploadOpen(true)}>
           수행 결과 업로드
         </Button>
@@ -350,6 +381,11 @@ export function ResultDashboardTab() {
             </table>
           ) : (
             <p className={styles.muted}>비교할 이전 차수가 없어요.</p>
+          )}
+          {previous && (
+            <Link className={styles.compareLink} to={`?view=compare&base=${encodeURIComponent(previous.id)}&target=${encodeURIComponent(current.id)}`}>
+              TC별 변화 보기 ({previous.round}차 → {current.round}차)
+            </Link>
           )}
           {previous && (previous.executionType ?? 'full') !== (current.executionType ?? 'full') && (
             <p className={styles.compareNote}>
