@@ -3,13 +3,20 @@ import { groupActivitiesByDay } from './groupActivities';
 import { ActivityTimeline } from './ActivityTimeline';
 import styles from './GroupedActivityList.module.css';
 
-export function GroupedActivityList({ activities, projectNames }: { activities: Activity[]; projectNames?: Record<string, string> }) {
+interface GroupedActivityListProps {
+  activities: Activity[];
+  projectNames?: Record<string, string>;
+  within?: 'oldest' | 'newest';
+  linkOf?: (activity: Activity) => string | undefined;
+}
+
+export function GroupedActivityList({ activities, projectNames, within, linkOf }: GroupedActivityListProps) {
   return (
     <div className={styles.groups}>
-      {groupActivitiesByDay(activities).map((group) => (
+      {groupActivitiesByDay(activities, { within }).map((group) => (
         <section key={group.key} aria-label={group.label} className={styles.group}>
           <h3 className={styles.day}>{group.label}</h3>
-          <ActivityTimeline activities={group.items} projectNames={projectNames} density="compact" />
+          <ActivityTimeline activities={group.items} projectNames={projectNames} density="compact" linkOf={linkOf} />
         </section>
       ))}
     </div>
