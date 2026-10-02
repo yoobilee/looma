@@ -7,7 +7,7 @@ import type { SeedData } from '../mock/seed';
 export type AppData = SeedData;
 
 /** 저장된 상태의 형식 버전. AppData 구조가 바뀌면 올리고 migrations에 이전 버전 변환을 추가한다. */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 /** 저장소에 들어가는 한 레코드. revision은 저장할 때마다 1씩 오르며 여러 탭의 덮어쓰기를 막는다. */
 export interface StoredAppState {

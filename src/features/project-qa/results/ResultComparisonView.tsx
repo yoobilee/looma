@@ -1,6 +1,6 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { compareResultRounds, type ResultChangeType } from '@/domain/resultComparison';
+import { compareResultRounds, type ResultChangeType, type ResultComparisonRow } from '@/domain/resultComparison';
 import { executionTypeLabel, NO_RESULT_LABEL, platformLabel, resultChangeTypeLabel } from '@/domain/labels';
 import type { Platform, TestCase, TestResult, TestResultImport, TestResultValue } from '@/domain/types';
 import { formatMonthDay } from '@/lib/date';
@@ -31,6 +31,8 @@ export interface ResultComparisonViewProps {
   currentId?: string | null;
   /** 사용자가 차수를 고르면 알린다. 호출한 쪽이 고른 값을 previousId · currentId로 다시 넘긴다. */
   onSelectionChange: (previousId: string, currentId: string) => void;
+  /** 있으면 행마다 이슈 · 확인사항 열을 더한다. 동작이 없는 행은 null을 돌려준다. */
+  renderIssueAction?: (row: ResultComparisonRow, view: { externalId?: string; title: string }) => ReactNode;
 }
 
 const PAGE_SIZE = 100;
@@ -67,7 +69,7 @@ const platformText = (platforms: (Platform | null)[]) =>
   platforms.length === 0 ? '없음' : platforms.map((platform) => (platform ? platformLabel[platform] : '플랫폼 없음')).join(' · ');
 
 /** 두 수행 차수(기준 → 비교)의 결과를 TC · 플랫폼별로 비교한다. 데이터를 바꾸지 않는다. */
-export function ResultComparisonView({ imports, resultsByImport, testCases, previousId, currentId, onSelectionChange }: ResultComparisonViewProps) {
+export function ResultComparisonView({ imports, resultsByImport, testCases, previousId, currentId, onSelectionChange, renderIssueAction }: ResultComparisonViewProps) {
   const sorted = useMemo(() => [...imports].sort((a, b) => a.round - b.round), [imports]);
   const { previous, current } = resolveComparisonRounds(sorted, previousId, currentId) ?? {};
   const [filter, setFilter] = useState<ComparisonFilter>('all');
@@ -229,6 +231,7 @@ export function ResultComparisonView({ imports, resultsByImport, testCases, prev
                     <th scope="col">{previous.round}차</th>
                     <th scope="col">{current.round}차</th>
                     <th scope="col">변화</th>
+                    {renderIssueAction && <th scope="col">이슈 / 확인사항</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -260,6 +263,11 @@ export function ResultComparisonView({ imports, resultsByImport, testCases, prev
                       <td data-label="변화">
                         <Tag tone={changeTone[view.row.changeType]}>{resultChangeTypeLabel[view.row.changeType]}</Tag>
                       </td>
+                      {renderIssueAction && (
+                        <td data-label="이슈 / 확인사항" className={styles.issueCell}>
+                          {renderIssueAction(view.row, view)}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

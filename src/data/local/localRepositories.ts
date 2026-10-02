@@ -1,5 +1,5 @@
 import type { Activity, ActivityType, ImportSourceArtifact, ScratchItem } from '@/domain/types';
-import { executionTypeLabel, testCaseStatusLabel } from '@/domain/labels';
+import { executionTypeLabel, issueStatusLabel, issueTypeLabel, platformLabel, testCaseStatusLabel, testResultLabel } from '@/domain/labels';
 import {
   decisionConflictMessage,
   decisionConflicts,
@@ -9,6 +9,7 @@ import {
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
 import { importSourceMimeType, toImportSourceSnapshot } from '@/domain/importSource';
+import { applyIssueChanges, buildIssue } from '@/domain/issues';
 import { analyzeTestAssetImport, planTestAssetImport, type ImportTable } from '@/domain/testAssetImport';
 import { analyzeResultImport, planResultImport, resultImportSummaryText, summarizeResultImport, usesCyclePlatform } from '@/domain/testResultImport';
 import type { ImportSourceFileInput, PersistenceController, PersistenceStatus, Repositories } from '../repositories/types';
@@ -320,6 +321,27 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
       artifact,
       snapshot: toImportSourceSnapshot(table, { format: source.format, fileName, sheetName: source.sheetName }),
     };
+  };
+
+  const updateIssue: Repositories['issues']['update'] = (id, rawChanges) => {
+    const changes = copy(rawChanges);
+    return mutate((draft) => {
+      const index = draft.issues.findIndex((item) => item.id === id);
+      if (index < 0) throw notFound('이슈', id);
+      const before = draft.issues[index];
+      const outcome = applyIssueChanges(before, changes, nowIso());
+      if (!outcome.changed) return unchanged(before);
+      const after = outcome.issue;
+      draft.issues[index] = after;
+      // 내용만 고친 경우는 남기지 않는다. 상태 변경만 기록으로 남긴다.
+      if (after.status !== before.status) {
+        record(draft, after.status === 'resolved' ? 'issue_resolved' : 'issue_updated', `${issueTypeLabel[after.type]} ${issueStatusLabel[after.status]}: ${after.title}`, {
+          projectId: after.projectId,
+          metadata: { detail: `${issueStatusLabel[before.status]} → ${issueStatusLabel[after.status]}`, issueId: after.id },
+        });
+      }
+      return after;
+    });
   };
 
   return {
@@ -644,30 +666,43 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
       async listByProject(projectId) {
         return copy(db.issues.filter((item) => item.projectId === projectId).sort(byNewest((item) => item.createdAt)));
       },
+      async get(id) {
+        return copy(db.issues.find((item) => item.id === id));
+      },
       create: (rawInput) => {
         const input = copy(rawInput);
         return mutate((draft) => {
-          const issue = {
-            id: createId('issue'),
-            status: input.type === 'defect' ? ('open' as const) : ('waiting' as const),
-            createdAt: nowIso(),
-            ...input,
-          };
+          const { projectId } = input;
+          if (!draft.projects.some((item) => item.id === projectId)) throw notFound('프로젝트', projectId);
+          // 결과는 이 프로젝트의 차수에 있어야 한다. 결과 · TC는 읽기만 한다.
+          const result = input.resultId ? draft.results.find((item) => item.id === input.resultId) : undefined;
+          const resultImport = result && draft.resultImports.find((item) => item.id === result.importId);
+          if (input.resultId && resultImport?.projectId !== projectId) throw notFound('수행 결과', input.resultId);
+          // 결과가 가리키는 TC도 같은 프로젝트에 있어야 한다. TC 없는(미연결) 결과는 TC 없이 연결하고, 입력 TC와 다르면 buildIssue가 거부한다.
+          if (result?.testCaseId && !draft.testCases.some((item) => item.id === result.testCaseId && item.projectId === projectId)) {
+            throw new Error(`수행 결과가 이 프로젝트에 없는 TC를 가리켜요. (${result.testCaseId})`);
+          }
+          if (!input.resultId && input.testCaseId && !draft.testCases.some((item) => item.id === input.testCaseId && item.projectId === projectId)) {
+            throw notFound('TC', input.testCaseId);
+          }
+          if (input.requirementId && !draft.requirements.some((item) => item.id === input.requirementId && item.projectId === projectId)) {
+            throw notFound('요구사항', input.requirementId);
+          }
+          const issue = buildIssue(input, { result }, { id: createId('issue'), now: nowIso() });
           draft.issues.push(issue);
-          record(draft, 'issue_created', `${input.type === 'defect' ? '이슈' : '확인사항'} 등록: ${issue.title}`, {
-            projectId: input.projectId,
-            metadata: { detail: input.feature ?? '' },
+          const resultDetail =
+            result &&
+            resultImport &&
+            [`${resultImport.round}차`, result.externalId, result.platform && platformLabel[result.platform], testResultLabel[result.result]].filter(Boolean).join(' ');
+          record(draft, 'issue_created', `${issueTypeLabel[issue.type]} 등록: ${issue.title}`, {
+            projectId,
+            metadata: { detail: resultDetail || issue.feature || '', issueId: issue.id },
           });
           return issue;
         });
       },
-      updateStatus: (id, status) =>
-        mutate((draft) => {
-          const issue = draft.issues.find((item) => item.id === id);
-          if (!issue) throw notFound('이슈', id);
-          issue.status = status;
-          return issue;
-        }),
+      update: updateIssue,
+      updateStatus: (id, status) => updateIssue(id, { status }),
     },
 
     knowledge: {

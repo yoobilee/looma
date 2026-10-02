@@ -281,7 +281,6 @@ export interface TestResult {
   rawResult?: string;
   /** 결과를 읽은 파일 행 번호 */
   sourceRowNumber?: number;
-  issueId?: string;
   note?: string;
 }
 
@@ -369,9 +368,15 @@ export interface ChangeAnalysis {
   testImpacts: TestImpact[];
 }
 
-/* 이슈 / 확인사항 */
+/*
+ * 이슈 / 확인사항 — 수행 결과를 보고 남긴 QA 판단 기록. 외부 결함관리 시스템을 대신하지 않고,
+ * 어떤 TC · 어떤 차수의 어떤 결과에서 무엇을 확인해야 했는지를 잃지 않게 연결한다.
+ * - defect(화면 라벨 "이슈"): 실제 결함 또는 이슈로 관리할 대상
+ * - question(확인사항): 사양 · 기획 · 정책 · 예상 동작을 확인해야 하는 항목
+ */
 export type IssueType = 'defect' | 'question';
-export type IssueStatus = 'open' | 'fixed' | 'closed' | 'waiting' | 'checking' | 'answered';
+/** open: 확인 필요, resolved: 해결됨, deferred: 보류. 네 방향 전환이 모두 가능하다. */
+export type IssueStatus = 'open' | 'resolved' | 'deferred';
 
 export interface Issue {
   id: string;
@@ -379,13 +384,34 @@ export interface Issue {
   type: IssueType;
   title: string;
   status: IssueStatus;
+  description?: string;
   feature?: string;
+  /**
+   * 연결 TC. 결과에서 만들었으면 그 결과의 TC이며(결과가 미연결이면 없다) 만든 뒤에는 바꾸지 않는다.
+   * 고객사 TC ID가 아니라 Looma 내부 ID다.
+   */
   testCaseId?: string;
+  /**
+   * 이 항목을 만든 수행 결과. 차수 · 플랫폼 · 결과 상태는 여기서 찾고 이슈에 복사하지 않는다(결과는 바뀌지 않는다).
+   * 결과 없이 만든 일반 항목에는 없다. 만든 뒤에는 바꾸지 않는다.
+   */
+  resultId?: string;
   requirementId?: string; // 요구사항 분석의 확인 필요 항목에서 만든 경우
   externalKey?: string; // BUG-014 같은 외부 이슈 번호
   sourceRef?: SourceRef;
+  /**
+   * 사용자가 판단 근거로 적은 기대 결과. 결과에서 만들 때 그 시점의 TC Expected Result로 채워 주지만 TC와 따로 저장한다.
+   * TC는 이후 revision으로 바뀔 수 있어, 당시 무엇을 기대했는지를 남기려는 기록이다.
+   */
+  expected?: string;
+  /** 실제 동작. 결과에서 만들 때 결과 비고로 채워 줄 수 있다. */
+  actual?: string;
+  reproduction?: string;
   note?: string;
   createdAt: string;
+  updatedAt: string;
+  /** resolved에 들어갈 때 기록하고, 다시 open · deferred가 되면 지운다. v1에서 옮긴 해결 항목은 시각을 알 수 없어 없다. */
+  resolvedAt?: string;
 }
 
 /* 업무 지식 */
@@ -439,6 +465,9 @@ export type ActivityType =
   | 'test_case_changed'
   | 'results_uploaded'
   | 'issue_created'
+  /** 이슈 · 확인사항 상태를 보류 · 다시 확인 필요로 바꿈. 내용만 고친 경우는 남기지 않는다. */
+  | 'issue_updated'
+  | 'issue_resolved'
   | 'project_changed'
   | 'knowledge_saved'
   | 'changes_applied'

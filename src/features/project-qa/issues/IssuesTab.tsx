@@ -1,134 +1,185 @@
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
-import { repositories } from '@/data';
+import { Link, useSearchParams } from 'react-router-dom';
+import { MessageSquareText, Plus } from 'lucide-react';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
-import { defectStatuses, issueStatusLabel, questionStatuses } from '@/domain/labels';
-import type { Deliverable, Issue, IssueStatus, TestCase } from '@/domain/types';
+import { laterResultsFor } from '@/domain/issues';
+import { issueStatusLabel, issueTypeLabel, platformLabel } from '@/domain/labels';
+import type { IssueType } from '@/domain/types';
+import { formatShortDate } from '@/lib/date';
 import { Button } from '@/components/ui/Button';
-import { SectionHeader } from '@/components/ui/SectionHeader';
+import { FilterTabs } from '@/components/ui/FilterTabs';
+import { ResultTag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
 import { IssueCreateDialog } from './IssueCreateDialog';
+import { IssueDetailDialog } from './IssueDetailDialog';
+import { IssueStatusTag, IssueTypeTag } from './IssueTags';
+import { indexIssueLinks, isIssueFilter, issueFilters, loadIssueContext, matchesIssueFilter, shortSourceLabel, sortIssues, sourceOf, type IssueFilter } from './issueView';
 import { QuestionBundleDialog } from './QuestionBundleDialog';
 import styles from './IssuesTab.module.css';
 
-function IssueLinks({ issue, testCases, deliverables }: { issue: Issue; testCases: TestCase[]; deliverables: Deliverable[] }) {
-  const testCase = testCases.find((item) => item.id === issue.testCaseId);
-  const source = issue.sourceRef ? deliverables.find((item) => item.id === issue.sourceRef?.deliverableId) : undefined;
-  const parts = [
-    issue.feature && `기능 ${issue.feature}`,
-    testCase && `연결 TC ${testCase.externalId ?? testCase.title}`,
-    source && `근거 ${source.type === 'figma' ? 'Figma' : source.type.toUpperCase()} ${issue.sourceRef?.locator}`,
-  ].filter(Boolean);
-  return parts.length ? <p className={styles.links}>{parts.join(' · ')}</p> : null;
-}
+const filterLabel: Record<IssueFilter, string> = {
+  all: '전체',
+  defect: issueTypeLabel.defect,
+  question: issueTypeLabel.question,
+  open: issueStatusLabel.open,
+  resolved: issueStatusLabel.resolved,
+  deferred: issueStatusLabel.deferred,
+};
 
-function StatusSelect({ issue, options }: { issue: Issue; options: IssueStatus[] }) {
-  return (
-    <label className={styles.statusSelect}>
-      <span className="visually-hidden">{issue.title} 상태</span>
-      <select
-        value={issue.status}
-        className={styles[`status_${issue.status}`]}
-        onChange={(event) => void repositories.issues.updateStatus(issue.id, event.target.value as IssueStatus)}
-      >
-        {options.map((status) => (
-          <option key={status} value={status}>
-            {issueStatusLabel[status]}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-/** 결함(이슈)과 기획/정책 확인사항을 분리해서 관리한다. */
+/**
+ * 이슈(결함)와 확인사항(사양 · 기획 · 정책 확인)을 한 목록에서 추적한다.
+ * 필터(`?filter=`)와 열어 둔 항목(`?issue=`)은 주소에 남겨 새로 고쳐도 · 다른 화면에서 링크로 와도 같은 화면이다.
+ */
 export function IssuesTab() {
   const { project } = useProjectContext();
-  const [createType, setCreateType] = useState<Issue['type'] | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedFilter = searchParams.get('filter');
+  const filter: IssueFilter = isIssueFilter(requestedFilter) ? requestedFilter : 'all';
+  const openIssueId = searchParams.get('issue');
+  const [createType, setCreateType] = useState<IssueType | null>(null);
   const [bundleOpen, setBundleOpen] = useState(false);
   const data = useRepositoryData(
-    async (repos) => ({
-      issues: await repos.issues.listByProject(project.id),
-      testCases: await repos.testCases.listByProject(project.id),
-      deliverables: await repos.deliverables.listByProject(project.id),
-    }),
+    async (repos) => ({ ...(await loadIssueContext(repos, project.id)), deliverables: await repos.deliverables.listByProject(project.id) }),
     [project.id],
   );
 
-  if (data.status === 'loading') return <LoadingState />;
-  if (data.status === 'error') return <StateMessage tone="error" title="이슈를 불러오지 못했어요." />;
+  if (data.status === 'loading' && !data.data) return <LoadingState />;
+  if (!data.data) return <StateMessage tone="error" title="이슈를 불러오지 못했어요." />;
 
-  const { issues, testCases, deliverables } = data.data;
-  const defects = issues.filter((issue) => issue.type === 'defect');
-  const questions = issues.filter((issue) => issue.type === 'question');
-  const openQuestions = questions.filter((issue) => issue.status !== 'answered');
+  const { issues, testCases, imports, results, deliverables } = data.data;
+  const links = indexIssueLinks({ testCases, imports, results });
+  const sorted = sortIssues(issues);
+  const visible = sorted.filter((issue) => matchesIssueFilter(issue, filter));
+  const openQuestions = sorted.filter((issue) => issue.type === 'question' && issue.status === 'open');
+  const openIssue = openIssueId ? issues.find((issue) => issue.id === openIssueId) : undefined;
+  const openLinks = openIssue && links.linksOf(openIssue);
+
+  const params = (patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) next.delete(key);
+      else next.set(key, value);
+    }
+    return next;
+  };
 
   return (
-    <div className={styles.layout}>
-      <section aria-labelledby="defects-title">
-        <SectionHeader
-          id="defects-title"
-          title="이슈"
-          meta={`${defects.filter((issue) => issue.status !== 'closed').length}건 진행 중 · 전체 ${defects.length}`}
-          action={
-            <Button size="sm" variant="secondary" icon={<Plus aria-hidden />} onClick={() => setCreateType('defect')}>
-              이슈 등록
-            </Button>
-          }
-        />
-        {defects.length === 0 ? (
-          <StateMessage compact title="등록된 이슈가 없어요." />
-        ) : (
-          <ul className={styles.list}>
-            {defects.map((issue) => (
-              <li key={issue.id} className={`${styles.item} ${issue.status === 'closed' ? styles.closed : ''}`}>
-                <div className={styles.itemHead}>
-                  <span className={styles.key}>{issue.externalKey ?? '내부 이슈'}</span>
-                  <StatusSelect issue={issue} options={defectStatuses} />
-                </div>
-                <p className={styles.title}>{issue.title}</p>
-                <IssueLinks issue={issue} testCases={testCases} deliverables={deliverables} />
-                {issue.note && <p className={styles.note}>{issue.note}</p>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+    <div className={styles.page}>
+      <div className={styles.toolbar}>
+        <div className={styles.filters}>
+          <FilterTabs
+            label="이슈 / 확인사항 보기"
+            value={filter}
+            onChange={(value) => setSearchParams(params({ filter: value === 'all' ? null : value }), { replace: true })}
+            options={issueFilters.map((value) => ({ value, label: filterLabel[value], count: issues.filter((issue) => matchesIssueFilter(issue, value)).length }))}
+          />
+        </div>
+        <div className={styles.actions}>
+          <Button size="sm" variant="ghost" icon={<MessageSquareText aria-hidden />} onClick={() => setBundleOpen(true)} disabled={openQuestions.length === 0}>
+            질문 묶음 {openQuestions.length > 0 && openQuestions.length}
+          </Button>
+          <Button size="sm" variant="secondary" icon={<Plus aria-hidden />} onClick={() => setCreateType('question')}>
+            확인사항 추가
+          </Button>
+          <Button size="sm" variant="primary" icon={<Plus aria-hidden />} onClick={() => setCreateType('defect')}>
+            이슈 추가
+          </Button>
+        </div>
+      </div>
+      <p className={styles.caption}>수행 결과의 FAIL · BLOCKED 행에서 만들면 TC · 차수 · 플랫폼이 함께 연결돼요. 여기서는 결과 없이 일반 항목을 추가할 수 있어요.</p>
 
-      <section aria-labelledby="questions-title" className={styles.questions}>
-        <SectionHeader
-          id="questions-title"
-          title="확인사항"
-          meta={`${openQuestions.length}개 대기`}
-          metaTone="coral"
-          action={
-            <Button size="sm" variant="ghost" icon={<Plus aria-hidden />} onClick={() => setCreateType('question')} aria-label="확인사항 추가">
-              추가
-            </Button>
-          }
-        />
-        <p className={styles.caption}>요구사항 분석에서 &lsquo;확인 필요&rsquo;로 나온 항목을 보내거나 직접 추가할 수 있어요.</p>
-        <ul className={styles.questionList}>
-          {questions.map((issue) => (
-            <li key={issue.id} className={`${styles.question} ${issue.status === 'answered' ? styles.answered : ''}`}>
-              <p className={styles.title}>{issue.title}</p>
-              {issue.note && <p className={styles.note}>{issue.note}</p>}
-              <IssueLinks issue={issue} testCases={testCases} deliverables={deliverables} />
-              <StatusSelect issue={issue} options={questionStatuses} />
-            </li>
-          ))}
-        </ul>
-        <button type="button" className={styles.bundle} onClick={() => setBundleOpen(true)} disabled={openQuestions.length === 0}>
-          <strong>질문 묶음 만들기</strong>
-          <span>답변 대기 중인 확인사항 {openQuestions.length}개를 한 번에 정리</span>
-        </button>
-      </section>
+      {issues.length === 0 ? (
+        <StateMessage title="아직 이슈 · 확인사항이 없어요." description="수행 결과에서 FAIL · BLOCKED 결과를 보고 만들거나, 위의 버튼으로 직접 추가해 보세요." />
+      ) : visible.length === 0 ? (
+        <StateMessage compact title={`${filterLabel[filter]} 항목이 없어요.`} />
+      ) : (
+        <table className={styles.table}>
+          <caption className="visually-hidden">
+            이슈 / 확인사항 {filterLabel[filter]} {visible.length}건
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">유형</th>
+              <th scope="col">상태</th>
+              <th scope="col">제목</th>
+              <th scope="col">TC</th>
+              <th scope="col">차수</th>
+              <th scope="col">플랫폼</th>
+              <th scope="col">연결된 결과</th>
+              <th scope="col">생성일</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((issue) => {
+              const { testCase, result, resultImport } = links.linksOf(issue);
+              const source = sourceOf(issue, deliverables);
+              // 기능 · 근거는 저장된 값을 그대로 보여 준다(이전 목록과 같은 표기).
+              const meta = [issue.feature && `기능 ${issue.feature}`, source && `근거 ${shortSourceLabel(source)}`].filter(Boolean).join(' · ');
+              return (
+                <tr key={issue.id} className={issue.status === 'resolved' ? styles.resolved : undefined}>
+                  <td data-label="유형">
+                    <IssueTypeTag type={issue.type} />
+                  </td>
+                  <td data-label="상태">
+                    <IssueStatusTag status={issue.status} />
+                  </td>
+                  <td data-label="제목" className={styles.title}>
+                    <Link to={{ search: params({ issue: issue.id }).toString() }} className={styles.titleLink}>
+                      {issue.title}
+                    </Link>
+                    {issue.externalKey && <span className={styles.key}>{issue.externalKey}</span>}
+                    {meta && <span className={styles.meta}>{meta}</span>}
+                  </td>
+                  <td data-label="TC" className={styles.testCase}>
+                    {testCase ? (
+                      <span>
+                        <span className={styles.tcId}>{testCase.externalId ?? 'ID 없음'}</span> {testCase.title}
+                      </span>
+                    ) : result ? (
+                      <span>
+                        {[result.externalId, result.title].filter(Boolean).join(' ')} <span className={styles.muted}>· 미연결</span>
+                      </span>
+                    ) : (
+                      <span className={styles.muted}>-</span>
+                    )}
+                  </td>
+                  <td data-label="차수">{resultImport ? `${resultImport.round}차` : <span className={styles.muted}>-</span>}</td>
+                  <td data-label="플랫폼">{result?.platform ? platformLabel[result.platform] : <span className={styles.muted}>-</span>}</td>
+                  <td data-label="연결된 결과">{result ? <ResultTag result={result.result} /> : <span className={styles.muted}>-</span>}</td>
+                  <td data-label="생성일" className={styles.date}>
+                    {formatShortDate(issue.createdAt)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
 
       {createType && (
-        <IssueCreateDialog open type={createType} projectId={project.id} testCases={testCases} onClose={() => setCreateType(null)} key={createType} />
+        <IssueCreateDialog
+          key={createType}
+          open
+          initialType={createType}
+          projectId={project.id}
+          testCases={testCases}
+          onClose={() => setCreateType(null)}
+        />
       )}
-      <QuestionBundleDialog open={bundleOpen} onClose={() => setBundleOpen(false)} projectName={project.name} questions={openQuestions} deliverables={deliverables} />
+      {openIssue && openLinks && (
+        <IssueDetailDialog
+          // 저장되면 새 값으로 입력 칸을 다시 채운다.
+          key={`${openIssue.id}:${openIssue.updatedAt}`}
+          projectId={project.id}
+          issue={openIssue}
+          links={openLinks}
+          source={sourceOf(openIssue, deliverables)}
+          laterResults={openLinks.result ? laterResultsFor(openLinks.result, imports, results) : []}
+          onClose={() => setSearchParams(params({ issue: null }), { replace: true })}
+        />
+      )}
+      <QuestionBundleDialog open={bundleOpen} onClose={() => setBundleOpen(false)} projectName={project.name} questions={openQuestions} deliverables={deliverables} testCases={testCases} />
     </div>
   );
 }

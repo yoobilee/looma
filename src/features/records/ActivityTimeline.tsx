@@ -3,7 +3,7 @@ import { activityTypeLabel } from '@/domain/labels';
 import { formatTime } from '@/lib/date';
 import styles from './ActivityTimeline.module.css';
 
-const emphasized = new Set<Activity['type']>(['task_started', 'task_completed', 'results_uploaded', 'issue_created']);
+const emphasized = new Set<Activity['type']>(['task_started', 'task_completed', 'results_uploaded', 'issue_created', 'issue_resolved']);
 
 interface ActivityTimelineProps {
   activities: Activity[];

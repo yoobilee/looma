@@ -233,3 +233,18 @@
     color: var(--color-muted);
   }
 }
+
+/* 동작이 없는 행에서도 열 너비가 흔들리지 않게 둔다. */
+.issueCell {
+  min-width: 150px;
+}
+
+@media (max-width: 640px) {
+  .issueCell {
+    min-width: 0;
+  }
+
+  .issueCell:empty {
+    display: none;
+  }
+}

@@ -25,6 +25,8 @@ const summaryPhrases: Partial<Record<ActivityType, (count: number) => string>> =
   test_case_changed: (count) => `TC 변경 ${count}건이 있었어요`,
   results_uploaded: (count) => `수행 결과 ${count}건을 업로드했어요`,
   issue_created: (count) => `이슈·확인사항 ${count}건을 등록했어요`,
+  issue_updated: (count) => `이슈·확인사항 상태를 ${count}번 바꿨어요`,
+  issue_resolved: (count) => `이슈·확인사항 ${count}건을 해결했어요`,
   knowledge_saved: (count) => `업무 지식 ${count}건을 정리했어요`,
   changes_applied: (count) => `변경사항 ${count}건을 반영했어요`,
   test_assets_imported: (count) => `TC 가져오기 ${count}건을 진행했어요`,

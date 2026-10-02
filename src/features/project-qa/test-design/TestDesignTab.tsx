@@ -35,6 +35,8 @@ export function TestDesignTab() {
   const initialSetup: TemplateSetupMode | null =
     searchParams.get('entry') === 'description' ? 'description' : searchParams.get('panel') === 'template' ? 'existing_tc' : null;
   const [setupMode, setSetupMode] = useState<TemplateSetupMode | null>(initialSetup);
+  // 이슈 · 확인사항 등에서 `?tc=<id>`로 들어오면 전체 목록에서 그 TC를 펼친다.
+  const focusTestCaseId = searchParams.get('tc') ?? undefined;
   const [filter, setFilter] = useState<CaseFilter>('all');
   const [importOpen, setImportOpen] = useState(false);
 
@@ -161,7 +163,7 @@ export function TestDesignTab() {
                 ]}
               />
             </div>
-            <TestCaseTable testCases={visible} deliverables={deliverables} />
+            <TestCaseTable testCases={visible} deliverables={deliverables} initialExpandedId={focusTestCaseId} />
           </>
         )}
       </section>
