@@ -123,7 +123,8 @@ export function ResultDashboardTab() {
     );
   }
 
-  // `?view=compare`: 두 차수를 TC별로 비교하는 화면. 고른 차수는 주소(base · target)에 남겨 새로 고쳐도 유지한다.
+  // `?view=compare`: 두 차수를 TC별로 비교하는 화면. 주소(base · target)가 고른 차수의 유일한 기준이다.
+  // 사용자가 고르면 주소에 남겨 새로 고쳐도 · 새 차수를 가져와도 유지하고, 주소에 없으면 가장 큰 두 차수를 자동으로 고른다.
   if (searchParams.get('view') === 'compare') {
     return (
       <div className={styles.page}>
@@ -140,8 +141,8 @@ export function ResultDashboardTab() {
           imports={imports}
           resultsByImport={resultsByImport}
           testCases={testCases}
-          initialPreviousId={searchParams.get('base')}
-          initialCurrentId={searchParams.get('target')}
+          previousId={searchParams.get('base')}
+          currentId={searchParams.get('target')}
           onSelectionChange={(base, target) => setSearchParams({ view: 'compare', base, target }, { replace: true })}
         />
         {uploadDialog}

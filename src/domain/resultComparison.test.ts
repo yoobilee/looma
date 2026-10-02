@@ -198,4 +198,15 @@ describe('기본 비교 차수', () => {
     expect(defaultComparisonRounds(imports)).toEqual({ previous: { id: 'b', round: 2 }, current: { id: 'c', round: 3 } });
     expect(defaultComparisonRounds([{ id: 'a', round: 1 }])).toBeUndefined();
   });
+
+  it('차수 번호는 문자열이 아니라 숫자로 비교한다(9 · 10 · 11차 → 10 → 11차)', () => {
+    const imports = [
+      { id: 'r10', round: 10 },
+      { id: 'r9', round: 9 },
+      { id: 'r11', round: 11 },
+      { id: 'r2', round: 2 },
+    ];
+    expect(defaultComparisonRounds(imports)).toEqual({ previous: { id: 'r10', round: 10 }, current: { id: 'r11', round: 11 } });
+    expect(defaultComparisonRounds(imports.slice(0, 2))).toEqual({ previous: { id: 'r9', round: 9 }, current: { id: 'r10', round: 10 } });
+  });
 });

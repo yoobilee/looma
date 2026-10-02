@@ -220,6 +220,12 @@
     border: 0;
   }
 
+  /* 긴 고객사 TC ID도 카드 폭 안에서 줄바꿈한다. */
+  .table .id {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   .table td::before {
     content: attr(data-label);
     font: var(--text-caption);

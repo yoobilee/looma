@@ -1,5 +1,5 @@
-import { unchangedChangeTypes, type ResultChangeType, type ResultComparisonRow } from '@/domain/resultComparison';
-import type { TestCase, TestResult } from '@/domain/types';
+import { defaultComparisonRounds, unchangedChangeTypes, type ResultChangeType, type ResultComparisonRow } from '@/domain/resultComparison';
+import type { TestCase, TestResult, TestResultImport } from '@/domain/types';
 
 /*
  * 수행 결과 비교 화면 전용 규칙: 목록 순서 · 필터 · 표시 값. 변화 유형 판정(도메인)과 분리한다.
@@ -23,7 +23,23 @@ const displayOrder: ResultChangeType[] = [
 ];
 const rankOf = new Map(displayOrder.map((type, index) => [type, index]));
 
-export type ComparisonFilter = 'all' | 'newly_failed' | 'still_failed' | 'fixed' | 'blocked' | 'scope';
+/**
+ * 비교할 두 차수. 고른 차수(주소의 base · target)가 둘 다 있고 서로 다르면 그 차수이고,
+ * 없거나 지워졌거나 같으면 차수 번호가 가장 큰 두 차수(자동 선택)다.
+ * 따로 저장하지 않고 매번 계산하므로 새 차수를 가져오거나 주소가 바뀌면 바로 따라간다.
+ */
+export function resolveComparisonRounds<T extends Pick<TestResultImport, 'id' | 'round'>>(
+  imports: T[],
+  previousId: string | null | undefined,
+  currentId: string | null | undefined,
+): { previous: T; current: T } | undefined {
+  const previous = imports.find((item) => item.id === previousId);
+  const current = imports.find((item) => item.id === currentId);
+  if (previous && current && previous !== current) return { previous, current };
+  return defaultComparisonRounds(imports);
+}
+
+export type ComparisonFilter ='all' | 'newly_failed' | 'still_failed' | 'fixed' | 'blocked' | 'scope';
 
 export const comparisonFilterLabel: Record<ComparisonFilter, string> = {
   all: '전체',

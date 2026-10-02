@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { compareResultRounds, defaultComparisonRounds, type ResultChangeType } from '@/domain/resultComparison';
+import { compareResultRounds, type ResultChangeType } from '@/domain/resultComparison';
 import { executionTypeLabel, NO_RESULT_LABEL, platformLabel, resultChangeTypeLabel } from '@/domain/labels';
 import type { Platform, TestCase, TestResult, TestResultImport, TestResultValue } from '@/domain/types';
 import { formatMonthDay } from '@/lib/date';
@@ -9,17 +9,28 @@ import { SelectField } from '@/components/ui/Field';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { StateMessage } from '@/components/ui/StateMessage';
 import { ResultTag, Tag, type TagTone } from '@/components/ui/Tag';
-import { comparisonFilterLabel, describeComparisonRows, matchesFilter, sortComparisonRows, type ComparisonFilter } from './comparisonView';
+import {
+  comparisonFilterLabel,
+  describeComparisonRows,
+  matchesFilter,
+  resolveComparisonRounds,
+  sortComparisonRows,
+  type ComparisonFilter,
+} from './comparisonView';
 import styles from './ResultComparisonView.module.css';
 
 export interface ResultComparisonViewProps {
   imports: TestResultImport[];
   resultsByImport: Record<string, TestResult[]>;
   testCases: TestCase[];
-  /** 처음 고를 기준 · 비교 차수(예: 주소의 값). 없거나 맞지 않으면 차수 번호가 가장 큰 두 차수다. */
-  initialPreviousId?: string | null;
-  initialCurrentId?: string | null;
-  onSelectionChange?: (previousId: string, currentId: string) => void;
+  /**
+   * 고른 기준 · 비교 차수(주소의 base · target). 화면은 이 값을 따로 복사해 두지 않는다.
+   * 없거나 맞지 않으면 차수 번호가 가장 큰 두 차수를 자동으로 고르고, 새 차수가 생기면 따라간다.
+   */
+  previousId?: string | null;
+  currentId?: string | null;
+  /** 사용자가 차수를 고르면 알린다. 호출한 쪽이 고른 값을 previousId · currentId로 다시 넘긴다. */
+  onSelectionChange: (previousId: string, currentId: string) => void;
 }
 
 const PAGE_SIZE = 100;
@@ -56,23 +67,17 @@ const platformText = (platforms: (Platform | null)[]) =>
   platforms.length === 0 ? '없음' : platforms.map((platform) => (platform ? platformLabel[platform] : '플랫폼 없음')).join(' · ');
 
 /** 두 수행 차수(기준 → 비교)의 결과를 TC · 플랫폼별로 비교한다. 데이터를 바꾸지 않는다. */
-export function ResultComparisonView({ imports, resultsByImport, testCases, initialPreviousId, initialCurrentId, onSelectionChange }: ResultComparisonViewProps) {
+export function ResultComparisonView({ imports, resultsByImport, testCases, previousId, currentId, onSelectionChange }: ResultComparisonViewProps) {
   const sorted = useMemo(() => [...imports].sort((a, b) => a.round - b.round), [imports]);
-  const fallback = defaultComparisonRounds(sorted);
-  const byId = new Map(sorted.map((item) => [item.id, item]));
-  const validInitial = initialPreviousId && initialCurrentId && initialPreviousId !== initialCurrentId && byId.has(initialPreviousId) && byId.has(initialCurrentId);
-  const [selection, setSelection] = useState(() =>
-    validInitial ? { previousId: initialPreviousId!, currentId: initialCurrentId! } : fallback ? { previousId: fallback.previous.id, currentId: fallback.current.id } : undefined,
-  );
+  const { previous, current } = resolveComparisonRounds(sorted, previousId, currentId) ?? {};
   const [filter, setFilter] = useState<ComparisonFilter>('all');
   const [includeUnchanged, setIncludeUnchanged] = useState(false);
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  // 비교하는 두 차수가 바뀌면(직접 고름 · 주소 이동 · 새 차수 자동 선택) 처음 100건부터 다시 보여 준다.
+  const pairKey = `${previous?.id}>${current?.id}`;
+  const [paging, setPaging] = useState({ pairKey, limit: PAGE_SIZE });
+  const limit = paging.pairKey === pairKey ? paging.limit : PAGE_SIZE;
+  const setLimit = (next: number) => setPaging({ pairKey, limit: next });
   const unchangedId = useId();
-
-  // 고른 차수가 지워졌으면(다른 탭에서 바뀐 경우 등) 기본 차수로 돌아간다.
-  const active = selection && byId.has(selection.previousId) && byId.has(selection.currentId) ? selection : fallback && { previousId: fallback.previous.id, currentId: fallback.current.id };
-  const previous = active ? byId.get(active.previousId) : undefined;
-  const current = active ? byId.get(active.currentId) : undefined;
 
   const comparison = useMemo(
     () => (previous && current ? compareResultRounds(previous, current, [...(resultsByImport[previous.id] ?? []), ...(resultsByImport[current.id] ?? [])]) : undefined),
@@ -83,15 +88,10 @@ export function ResultComparisonView({ imports, resultsByImport, testCases, init
     return sortComparisonRows(describeComparisonRows(comparison.rows, testCases, [...(resultsByImport[previous.id] ?? []), ...(resultsByImport[current.id] ?? [])]));
   }, [comparison, testCases, resultsByImport, previous, current]);
 
-  if (sorted.length < 2 || !active || !previous || !current) {
+  if (!previous || !current) {
     return <StateMessage title="비교할 수행 차수가 부족해요." description="수행 결과 차수가 2개 이상 있어야 기준 차수와 비교 차수를 고를 수 있어요." />;
   }
 
-  const select = (next: { previousId: string; currentId: string }) => {
-    setSelection(next);
-    setLimit(PAGE_SIZE);
-    onSelectionChange?.(next.previousId, next.currentId);
-  };
   const changeFilter = (next: ComparisonFilter) => {
     setFilter(next);
     setLimit(PAGE_SIZE);
@@ -130,11 +130,11 @@ export function ResultComparisonView({ imports, resultsByImport, testCases, init
   return (
     <div className={styles.view}>
       <div className={styles.selectors}>
-        <SelectField label="기준 차수" value={previous.id} onChange={(event) => select({ previousId: event.target.value, currentId: current.id })}>
+        <SelectField label="기준 차수" value={previous.id} onChange={(event) => onSelectionChange(event.target.value, current.id)}>
           {optionsFor(current.id)}
         </SelectField>
         <ArrowRight aria-hidden className={styles.arrow} />
-        <SelectField label="비교 차수" value={current.id} onChange={(event) => select({ previousId: previous.id, currentId: event.target.value })}>
+        <SelectField label="비교 차수" value={current.id} onChange={(event) => onSelectionChange(previous.id, event.target.value)}>
           {optionsFor(previous.id)}
         </SelectField>
       </div>
@@ -263,7 +263,7 @@ export function ResultComparisonView({ imports, resultsByImport, testCases, init
               </table>
             )}
             {visible.length > shown.length && (
-              <Button size="sm" variant="ghost" onClick={() => setLimit((value) => value + PAGE_SIZE)}>
+              <Button size="sm" variant="ghost" onClick={() => setLimit(limit + PAGE_SIZE)}>
                 {`${Math.min(PAGE_SIZE, visible.length - shown.length)}건 더 보기 (남은 ${visible.length - shown.length}건)`}
               </Button>
             )}

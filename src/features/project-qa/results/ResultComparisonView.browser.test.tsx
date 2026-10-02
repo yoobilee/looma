@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -85,11 +85,30 @@ const RESULTS: Record<string, TestResult[]> = {
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
+/** 결과 화면이 주소에 하듯 고른 차수를 들고 다시 넘긴다. */
+function Harness({ onSelectionChange, ...props }: Partial<ResultComparisonViewProps>) {
+  const [pair, setPair] = useState<{ previousId: string; currentId: string }>();
+  return (
+    <ResultComparisonView
+      imports={IMPORTS}
+      resultsByImport={RESULTS}
+      testCases={TEST_CASES}
+      previousId={pair?.previousId}
+      currentId={pair?.currentId}
+      onSelectionChange={(previousId, currentId) => {
+        setPair({ previousId, currentId });
+        onSelectionChange?.(previousId, currentId);
+      }}
+      {...props}
+    />
+  );
+}
+
 async function render(props: Partial<ResultComparisonViewProps> = {}) {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root!.render(<ResultComparisonView imports={IMPORTS} resultsByImport={RESULTS} testCases={TEST_CASES} {...props} />));
+  await act(async () => root!.render(<Harness {...props} />));
   return container;
 }
 
@@ -186,9 +205,12 @@ describe('수행 결과 비교 화면', () => {
     expect(view.textContent).toContain('비교할 수행 차수가 부족해요.');
   });
 
-  it('390px에서 가로로 넘치지 않고, 표는 행마다 카드로 쌓인다', async () => {
+  it('390px에서 가로로 넘치지 않고(48자 고객사 TC ID 포함), 표는 행마다 카드로 쌓인다', async () => {
     await page.viewport(390, 844);
-    const view = await render();
+    const longId = `CLIENT-A-${'0'.repeat(39)}`;
+    expect(longId).toHaveLength(48);
+    const view = await render({ testCases: TEST_CASES.map((item) => (item.id === 'tc-1' ? { ...item, externalId: longId } : item)) });
+    expect(view.querySelector('tbody')!.textContent).toContain(longId);
     await userEvent.click(page.getByLabelText('변화 없음 포함'));
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
     expect(view.scrollWidth).toBeLessThanOrEqual(view.clientWidth);
