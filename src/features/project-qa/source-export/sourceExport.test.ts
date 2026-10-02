@@ -417,11 +417,17 @@ describe('최종 파일 확인 (계획한 변경이 있으면 바꾼 셀이 0개
 /** openpyxl로 만든 단순 TC 시트(src/lib/ooxml/__fixtures__/make_append_fixtures.py). TC ID MEM-001~003, 2~4행 */
 const appendFixtureBytes = (name: string) => new Uint8Array(readFileSync(fileURLToPath(new URL(`../../../lib/ooxml/__fixtures__/${name}.xlsx`, import.meta.url))));
 
-/** 예시 데이터 TC가 신규 TC 후보가 되지 않도록 이 프로젝트의 TC를 비운 뒤 fixture를 가져온다. */
+/** 예시 데이터 TC가 신규 TC 후보가 되지 않도록 이 프로젝트의 TC를 비운다. */
+function clearProjectTestCases(data: AppData) {
+  data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
+  // 저장 상태는 참조하는 TC가 있어야 읽힌다. 지운 TC를 가리키던 결과 · 이슈는 미연결로 둔다.
+  const kept = new Set(data.testCases.map((item) => item.id));
+  for (const item of [...data.results, ...data.issues]) if (item.testCaseId && !kept.has(item.testCaseId)) delete item.testCaseId;
+}
+
+/** 이 프로젝트의 TC를 비운 뒤 fixture를 가져온다. */
 async function importAppendFixture(store: StateStore, repos: Repositories, name = 'append-base') {
-  await editState(store, repos, (data) => {
-    data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
-  });
+  await editState(store, repos, clearProjectTestCases);
   return importTestAssets(repos, appendFixtureBytes(name));
 }
 
@@ -633,9 +639,7 @@ describe('신규 TC 새 행 추가 · 독립 리뷰 지적 회귀', () => {
   it('M1: Pre-condition 열을 매핑하지 않은 파일에서는 파일에 쓰일 값으로 그 TC를 정확히 다시 찾을 수 있는 TC만 넣는다', async () => {
     const store = createMemoryStateStore();
     const repos = await openRepos(store);
-    await editState(store, repos, (data) => {
-      data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
-    });
+    await editState(store, repos, clearProjectTestCases);
     // append-base를 Pre-condition 열 없이(매핑하지 않고) 가져온다.
     const original = appendFixtureBytes('append-base');
     const { table, blob } = await readTable(original, 'TC');
@@ -700,9 +704,7 @@ describe('신규 TC 새 행 추가 · 독립 리뷰 지적 회귀', () => {
         .replace(/<c r="([A-Z]+)(\d+)"/g, (_, column: string, row: string) => `<c r="${column}${Number(row) + offset}"`)
         .replace('<dimension ref="A1:J4"/>', `<dimension ref="A${1 + offset}:J${4 + offset}"/>`),
     );
-    await editState(store, repos, (data) => {
-      data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
-    });
+    await editState(store, repos, clearProjectTestCases);
     const { original, session } = await importTestAssets(repos, zipSync(files));
     expect(session.sourceSnapshot!.rows.map((row) => row.rowNumber)).toEqual([1048574, 1048575, 1048576]);
     await editState(store, repos, (data) => {

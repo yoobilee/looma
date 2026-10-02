@@ -5,7 +5,7 @@ import { parseCsv } from '@/lib/csv';
 import { PersistenceError } from '../persistenceError';
 import type { Repositories } from '../repositories/types';
 import { importQaRound, legacyV1State, QA_TEST_CASE_ID, qaScenarioSeed } from '../mock/issueScenario';
-import { createSeed, PROJECT_A } from '../mock/seed';
+import { createSeed, PROJECT_A, PROJECT_B } from '../mock/seed';
 import { CURRENT_SCHEMA_VERSION, type AppData, type StoredAppState } from './appData';
 import { openIndexedDbStateStore } from './indexedDbStateStore';
 import { createLocalRepositories, type LocalRepositoryOptions } from './localRepositories';
@@ -501,7 +501,7 @@ describe('v1 저장 데이터 변환 (실제 IndexedDB)', () => {
 });
 
 describe('v1 변환 fail-closed (실제 IndexedDB)', () => {
-  type LegacyData = Record<'issues' | 'results', Record<string, unknown>[]>;
+  type LegacyData = Record<'issues' | 'results' | 'resultImports' | 'testCases', Record<string, unknown>[]>;
 
   /** 이전 버전 앱이 저장한 v1 상태(revision 8)와 원본 bytes 하나를 실제 IndexedDB에 넣는다. */
   async function seedLegacy(factory: IDBFactory, change: (data: LegacyData) => void = () => {}, schemaVersion = 1) {
@@ -533,11 +533,31 @@ describe('v1 변환 fail-closed (실제 IndexedDB)', () => {
     ['TestResult ID 중복', (data: LegacyData) => void (data.results[1].id = data.results[0].id)],
     ['같은 이슈를 결과 2개가 가리킴', (data: LegacyData) => void (data.results.find((result) => result.id === 'imp-a-2-SIGN-002-android')!.issueId = 'issue-bug-014')],
     ['없는 이슈를 가리킴', (data: LegacyData) => void (data.results[0].issueId = 'issue-missing')],
+    ['차수의 importedAt이 날짜가 아님', (data: LegacyData) => void (data.resultImports[0].importedAt = 'not-a-date')],
+    ['차수의 mapping이 없음', (data: LegacyData) => void delete data.resultImports[0].mapping],
+    ['연결 결과의 TC(tc-002)가 삭제됨', (data: LegacyData) => void (data.testCases = data.testCases.filter((item) => item.id !== 'tc-002'))],
+    ['연결 결과의 TC(tc-002)가 다른 프로젝트로 옮겨짐', (data: LegacyData) => void (data.testCases.find((item) => item.id === 'tc-002')!.projectId = PROJECT_B)],
   ])('%s → migration_failed, IndexedDB의 v1 상태 · revision · 원본 bytes · 메모리 그대로', async (_, change) => {
     const { factory, name } = isolatedFactory();
     await seedLegacy(factory, change);
     await expectBlocked(factory, name, 'migration_failed');
     expect((await inspectDatabase(name)).state.schemaVersion).toBe(1);
+  });
+
+  it('필수 필드가 깨진 v1로 막힌 뒤 원인을 고치면 다시 불러와 변환한다', async () => {
+    const { factory, name } = isolatedFactory();
+    await seedLegacy(factory, (data) => void (data.resultImports[0].importedAt = 'not-a-date'));
+    const repos = await expectBlocked(factory, name, 'migration_failed');
+
+    // 사용자가 다른 방법으로 v1 데이터를 고쳤다(같은 v1 형식, revision +1).
+    const fixed = legacyV1State(8);
+    await (await openIndexedDbStateStore(factory)).commit({ expectedRevision: 8, schemaVersion: 1, savedAt: fixed.savedAt, data: fixed.data as AppData });
+    await repos.persistence.load();
+    expect(repos.persistence.getStatus()).toMatchObject({ state: 'ready', revision: 10 });
+    const saved = await inspectDatabase(name);
+    expect(saved.state).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION, revision: 10 });
+    expect(saved.artifacts.get('src-legacy')).toBe('v1 원본 bytes');
+    expect(await repos.issues.get('issue-bug-014')).toMatchObject({ resultId: 'imp-a-2-SIGN-002-ios', testCaseId: 'tc-002' });
   });
 
   it('schemaVersion 2로 적힌 v1 모양 데이터는 corrupt로 막고 바꾸지 않는다', async () => {

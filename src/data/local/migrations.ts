@@ -27,13 +27,13 @@ export const v1IssueStatusMapping: ReadonlyMap<string, IssueStatus> = new Map([
 
 /**
  * v1 → v2: 이슈 · 확인사항 추적. 해석할 수 있는 v1 데이터만 v2로 올리고, 아니면 던져서 변환을 멈춘다(저장된 v1은 그대로).
- * 1) v1 모양 검증(assertV1AppData): 구조 · 열거값 · 날짜 · 참조 필드 타입 · ID 중복. 모르는 필드는 그대로 둔다.
+ * 1) v1 모양 검증(assertV1AppData): 구조 · 열거값 · 날짜 · 화면이 읽는 필수 필드 · 참조 필드 타입 · ID 중복. 모르는 필드는 그대로 둔다.
  * 2) 이슈 상태를 세 가지로 바꾸고, 없던 updatedAt은 createdAt으로 채운다. 해결 시각은 만들지 않는다.
  * 3) 결과 → 이슈 연결(TestResult.issueId)을 이슈 → 결과 연결(Issue.resultId)로 옮기고 결과에서는 지운다.
  *    옮길 수 있는 연결은 1:1뿐이다: 그 이슈가 있고, 한 이슈를 결과 하나만 가리키며, 결과의 차수가 같은 프로젝트이고, TC가 어긋나지 않는다.
  *    하나라도 아니면(없는 이슈 · 같은 이슈를 여러 결과가 가리킴 · 다른 프로젝트 · 다른 TC) 결과를 고르거나 연결을 지우지 않고 변환 전체를 멈춘다.
  *    v2에는 결과 쪽 연결 필드가 없어, 옮기지 못한 연결을 지우면 원래 관계를 다시 알 수 없기 때문이다.
- * 4) 결과가 현재 버전 검증(assertCurrentAppData)을 통과해야 한다.
+ * 4) 결과가 현재 버전 검증(assertCurrentAppData)을 통과해야 한다. 참조 대상(프로젝트 · TC · 차수 · 결과)이 없거나 다른 프로젝트면 여기서 멈춘다.
  * 결과는 배열 순서와 무관하다. 입력은 바꾸지 않고 새 객체를 돌려준다.
  */
 export function migrateV1ToV2(data: unknown): unknown {
