@@ -1,6 +1,6 @@
 import { isXmlSafeText } from '@/lib/ooxml/xml';
 import { resultImportFieldLabel, testAssetImportFieldLabel, testCaseStatusLabel, testPerspectiveLabel, testResultLabel } from './labels';
-import { compositeKey, contentChanges, parseImportRow, type ColumnMapping, type ImportTable, type ImportTableRow, type TestAssetImportField } from './testAssetImport';
+import { analyzeTestAssetImport, compositeKey, contentChanges, parseImportRow, type AnalyzedImportRow, type ColumnMapping, type ImportTable, type ImportTableRow, type TestAssetImportField } from './testAssetImport';
 import { platformResultFields, resultValueKey, type ResultColumnMapping } from './testResultImport';
 import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession, TestCase, TestCaseStatus, TestResult, TestResultImport } from './types';
 
@@ -155,23 +155,47 @@ const APPENDABLE_STATUSES: TestCaseStatus[] = ['reviewed', 'active'];
 
 const testCaseLabel = (testCase: TestCase) => `${testCase.externalId ?? 'TC ID 없음'} · ${testCase.title}`;
 
+/** 내보낸 파일을 다시 가져올 때 이 행이 그 TC와 정확히 하나로 이어지지 않는 이유. 이어지면 undefined. */
+function reimportProblem(item: AnalyzedImportRow | undefined, testCase: TestCase, byId: ReadonlyMap<string, TestCase>): string | undefined {
+  if (!item) return '다시 가져올 때 이 행을 읽을 수 없어요.';
+  if (item.kind === 'exact_match' && item.targetId === testCase.id) return undefined;
+  const prefix = '다시 가져오면 이 TC와 정확히 이어지지 않아요.';
+  switch (item.kind) {
+    case 'invalid':
+      return `${prefix} 오류 행이 돼요. (${item.issues.filter((issue) => issue.level === 'error').map((issue) => issue.message).join(' ')})`;
+    case 'new':
+      return `${prefix} 고객사 TC ID가 없는 행은 기능 · 테스트 항목 · Pre-condition · Expected Result로 TC를 찾는데, 이 파일에 쓰이는 값(매핑한 열)만으로는 지금 TC와 같지 않아요(매핑하지 않은 열의 값 등).`;
+    case 'conflict':
+      if (item.conflictReason === 'shared_target') return `${prefix} 파일의 다른 행도 같은 TC를 가리켜요(파일에 쓰이는 값이 같은 행).`;
+      if (item.conflictReason === 'ambiguous_content') return `${prefix} 파일에 쓰이는 값 기준으로 같은 내용의 TC가 여럿이라 어느 TC인지 정할 수 없어요.`;
+      if (item.conflictReason === 'ambiguous_external_id') return `${prefix} 같은 고객사 TC ID를 쓰는 TC가 여럿이에요.`;
+      return `${prefix} 고객사 TC ID와 내용이 서로 다른 TC를 가리켜요.`;
+    default: {
+      const other = item.targetId ? byId.get(item.targetId) : undefined;
+      return `${prefix} 다른 TC(${other ? testCaseLabel(other) : item.targetId})와 이어져요.`;
+    }
+  }
+}
+
 /**
  * Looma에서 만든 TC를 원본 표 끝에 붙일 새 행으로 바꾼다. 하나라도 확신할 수 없는 TC는 넣지 않고 이유를 남긴다.
  * 대상 파일은 사용자가 내보내기를 실행한 이 가져오기의 원본 하나다. 다른 파일로 나누거나 대상을 추측하지 않는다.
  * - 고객사 TC ID가 있으면 그 값을 쓰고, 없으면 TC ID 칸을 비운다. 번호를 만들거나 Looma 내부 ID를 대신 쓰지 않는다.
  * - TC ID가 있으면 원본 파일 · 프로젝트에서 그 ID가 겹치지 않아야 한다.
- * - TC ID 없이 쓰는 행은 다시 가져올 때 내용(기능 · 테스트 항목 · Pre-condition · Expected Result)으로만 TC를 찾으므로,
- *   같은 조합의 원본 행이나 다른 TC가 있으면 넣지 않는다(가져오기와 같은 compositeKey 기준).
  * - 새 행을 가져오기 규칙으로 다시 읽어 지금 TC와 같은 뜻이고 다시 가져올 수 있는 행이어야 한다.
+ * - 고객사 TC ID 없이 쓰는 행은 파일에 쓰일 값을 다시 읽은 내용 기준(compositeKey)이 원본 행과 같으면 넣지 않는다.
+ * - 마지막으로 내보낼 표 전체(기존 행 + 새 행, 실제로 파일에 쓰일 값)를 가져오기 분석(analyzeTestAssetImport)에 그대로 넣어,
+ *   새 행마다 그 TC와 정확히 하나로 exact_match되는지 확인한다. 매핑하지 않은 열 때문에 값이 빠지거나, 원본 행 · 다른 TC ·
+ *   다른 새 행과 파일에 쓰이는 값이 겹쳐 다시 가져올 때 구별할 수 없는 TC는 모두 넣지 않는다(겹친 쪽도 함께 뺀다).
  */
 function planNewTestCaseRows(
   candidates: TestCase[],
   projectTestCases: TestCase[],
   snapshot: ImportSourceSnapshot,
+  outputRows: ImportTableRow[],
   mapping: ColumnMapping,
   fields: Set<TestAssetImportField>,
 ): { appends: SourceRowAppend[]; skipped: SourceExportSkip[] } {
-  const appends: SourceRowAppend[] = [];
   const skipped: SourceExportSkip[] = [];
   const skip = (testCase: TestCase, reason: string) => skipped.push({ entityId: testCase.id, label: testCaseLabel(testCase), reason });
 
@@ -183,15 +207,17 @@ function planNewTestCaseRows(
       ? `원본 표의 마지막 행(${lastRow.rowNumber}행)이 TC 행이 아니라(빈 칸 · 합계 · 메모 등) 새 행을 추가할 위치를 확정할 수 없어요.`
       : undefined;
 
-  const existingRows = snapshot.rows.map((row) => ({ rowNumber: row.rowNumber, parsed: parseImportRow(row, mapping) })).filter(({ parsed }) => parsed.title && parsed.expectedResult);
   // 프로젝트 안에서 고객사 TC ID는 한 TC만 쓴다(가져오기와 같은 규칙). 다른 파일에 연결된 TC도 센다.
   const externalIdCount = new Map<string, number>();
   for (const testCase of projectTestCases) {
     const id = testCase.externalId?.normalize('NFC').trim();
     if (id) externalIdCount.set(id, (externalIdCount.get(id) ?? 0) + 1);
   }
-  let nextRow = lastRow.rowNumber + 1;
 
+  // 고객사 TC ID 없이 다시 가져오면 행은 가져오기와 같은 내용 기준(compositeKey)으로 TC를 찾는다. 기존 행도 파일에 쓰일 값을 다시 읽은 값으로 비교한다.
+  const outputKeys = outputRows.map((row) => ({ rowNumber: row.rowNumber, key: compositeKey(parseImportRow(row, mapping)) }));
+
+  let drafts: { testCase: TestCase; cells: string[]; missingExternalId: boolean }[] = [];
   for (const testCase of candidates) {
     if (testCase.status === 'deprecated') {
       skip(testCase, '폐기된 TC예요.');
@@ -232,7 +258,7 @@ function planNewTestCaseRows(
       skip(testCase, `셀 하나에 넣을 수 있는 글자 수(${MAX_CELL_TEXT}자)를 넘는 값이 있어요.`);
       continue;
     }
-    const row: ImportTableRow = { rowNumber: nextRow, cells };
+    const row: ImportTableRow = { rowNumber: 0, cells };
     const reparsed = parseImportRow(row, mapping);
     if (!reparsed.title || !reparsed.expectedResult || !reparsed.feature) {
       skip(testCase, '테스트 항목 · Expected Result · 기능(대분류) 중 빈 값이 있어 다시 가져올 수 없는 행이 돼요.');
@@ -244,21 +270,30 @@ function planNewTestCaseRows(
       continue;
     }
     if (!reparsed.externalId) {
-      const key = compositeKey(testCase);
-      const sameRow = existingRows.find(({ parsed }) => compositeKey(parsed) === key);
+      const key = compositeKey(reparsed);
+      const sameRow = outputKeys.find((item) => item.key === key);
       if (sameRow) {
-        skip(testCase, `원본 파일 ${sameRow.rowNumber}행과 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.`);
-        continue;
-      }
-      const sameCase = projectTestCases.find((other) => other.id !== testCase.id && compositeKey(other) === key);
-      if (sameCase) {
-        skip(testCase, `다른 TC(${testCaseLabel(sameCase)})와 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.`);
+        skip(testCase, `원본 파일 ${sameRow.rowNumber}행과 파일에 쓰이는 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 구별할 수 없어요.`);
         continue;
       }
     }
-    appends.push({ rowNumber: nextRow, entityId: testCase.id, label: testCaseLabel(testCase), cells, missingExternalId: fields.has('externalId') && !externalId });
-    nextRow += 1;
+    drafts.push({ testCase, cells, missingExternalId: fields.has('externalId') && !externalId });
   }
+
+  // 내보낼 표 전체를 다시 가져오기 분석에 넣고, 정확히 이어지지 않는 새 행을 뺀다. 뺀 뒤 행 번호가 바뀌므로 모두 이어질 때까지 다시 본다.
+  const byId = new Map(projectTestCases.map((testCase) => [testCase.id, testCase]));
+  const firstNewRow = lastRow.rowNumber + 1;
+  while (drafts.length > 0) {
+    const table: ImportTable = { headers: [...snapshot.headers], rows: [...outputRows, ...drafts.map((draft, index) => ({ rowNumber: firstNewRow + index, cells: [...draft.cells] }))] };
+    const analysis = analyzeTestAssetImport(table, mapping, projectTestCases);
+    const byRow = new Map(analysis.rows.map((item) => [item.row.rowNumber, item]));
+    const problems = drafts.map((draft, index) => reimportProblem(byRow.get(firstNewRow + index), draft.testCase, byId));
+    if (problems.every((problem) => problem === undefined)) break;
+    drafts.forEach((draft, index) => problems[index] && skip(draft.testCase, problems[index]));
+    drafts = drafts.filter((_, index) => problems[index] === undefined);
+  }
+
+  const appends = drafts.map(({ testCase, cells, missingExternalId }, index) => ({ rowNumber: firstNewRow + index, entityId: testCase.id, label: testCaseLabel(testCase), cells, missingExternalId }));
   return { appends, skipped };
 }
 
@@ -341,7 +376,13 @@ export function planTestAssetSourceExport(
         ...(otherImports > 0 ? [`다른 가져오기 파일의 행과 연결된 TC ${otherImports}건은 포함되지 않아요.`] : []),
       ];
   const ordered = [...newCases].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-  const { appends, skipped } = ordered.length > 0 ? planNewTestCaseRows(ordered, projectTestCases, ready.snapshot, mapping, fields) : { appends: [], skipped: [] };
+  // 새 행을 다시 가져오기로 확인할 때는 기존 행도 이번에 고친 값으로 본다(실제로 파일에 쓰일 표).
+  const outputRows = ready.snapshot.rows.map((row) => {
+    const cells = [...row.cells];
+    for (const patch of patches) if (patch.rowNumber === row.rowNumber) cells[patch.columnIndex] = patch.nextValue;
+    return { rowNumber: row.rowNumber, cells };
+  });
+  const { appends, skipped } = ordered.length > 0 ? planNewTestCaseRows(ordered, projectTestCases, ready.snapshot, outputRows, mapping, fields) : { appends: [], skipped: [] };
 
   const byId = new Map(projectTestCases.map((testCase) => [testCase.id, testCase]));
   const verifyEntities = (outputRows: ReadonlyMap<number, ImportTableRow>, appended: SourceRowAppend[]) => [

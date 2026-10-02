@@ -683,3 +683,57 @@ describe('신규 행 이어 붙이기', () => {
     expect(problemsOf(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], { validateXml }, [newRow(5, ROW_A)]))[0]).toContain('검사기 거부');
   });
 });
+
+/* Codex 리뷰 M2: Excel 시트 최대 행(1,048,576)을 넘는 새 행 */
+describe('신규 행 이어 붙이기 · Excel 최대 행', () => {
+  const EXCEL_MAX_ROW = 1048576;
+  /** append-base의 행 번호를 offset만큼 내린다(헤더 1+offset, TC 2+offset ~ 4+offset). */
+  const shifted = (offset: number) =>
+    withSheet('append-base', (xml) =>
+      xml
+        .replace(/<row r="(\d+)"/g, (_, row: string) => `<row r="${Number(row) + offset}"`)
+        .replace(/<c r="([A-Z]+)(\d+)"/g, (_, column: string, row: string) => `<c r="${column}${Number(row) + offset}"`)
+        .replace('<dimension ref="A1:J4"/>', `<dimension ref="A${1 + offset}:J${4 + offset}"/>`),
+    );
+  const shiftedLayout = (offset: number): XlsxSheetLayout => ({ ...APPEND_LAYOUT, headerRowNumber: 1 + offset });
+  const dimensionOf = (bytes: Uint8Array) => /<dimension ref="([^"]+)"/.exec(sheetXmlOf(bytes))?.[1];
+
+  it('마지막 TC 행이 1,048,575면 신규 행 1개를 1,048,576행에 붙이고 dimension도 최대 행까지만 넓힌다', () => {
+    const offset = EXCEL_MAX_ROW - 5; // 마지막 TC 행 = 1,048,575
+    const result = ok(patchXlsx(shifted(offset), shiftedLayout(offset), [], {}, [newRow(EXCEL_MAX_ROW, ROW_A)]));
+    expect(result.appendedRows).toEqual([EXCEL_MAX_ROW]);
+    expect(dimensionOf(result.bytes)).toBe(`A${1 + offset}:J${EXCEL_MAX_ROW}`);
+    expect(sheetValues(result.bytes, 'TC')[`E${EXCEL_MAX_ROW}`]).toBe('카카오 가입');
+  });
+
+  it('마지막 TC 행이 1,048,576이면 행을 붙이지 않는다(1,048,577행 · dimension을 만들지 않는다)', () => {
+    const offset = EXCEL_MAX_ROW - 4;
+    const problems = blockedProblems(patchXlsx(shifted(offset), shiftedLayout(offset), [], {}, [newRow(EXCEL_MAX_ROW + 1, ROW_A)]));
+    expect(problems).toEqual(['새 행(1048577~1048577행)이 Excel 시트의 최대 행(1,048,576행)을 넘어 추가할 수 없어요.']);
+  });
+
+  it('여러 행 중 하나라도 최대 행을 넘으면 앞의 행도 붙이지 않는다(일부만 붙이지 않는다)', () => {
+    const offset = EXCEL_MAX_ROW - 5;
+    const problems = blockedProblems(patchXlsx(shifted(offset), shiftedLayout(offset), [], {}, [newRow(EXCEL_MAX_ROW, ROW_A), newRow(EXCEL_MAX_ROW + 1, ROW_B)]));
+    expect(problems[0]).toContain('새 행(1048576~1048577행)이 Excel 시트의 최대 행');
+  });
+
+  it('행 번호가 1보다 작거나 정수가 아니면 붙이지 않는다', () => {
+    expect(blockedProblems(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(0, ROW_A)]))[0]).toContain('최대 행');
+    expect(blockedProblems(patchXlsx(appendFixture('append-base'), APPEND_LAYOUT, [], {}, [newRow(4.5, ROW_A)]))[0]).toContain('최대 행');
+  });
+
+  it('최대 행 때문에 막혀도 기존 셀 patch만 하면 그대로 성공하고 dimension은 원본 그대로다', () => {
+    const offset = EXCEL_MAX_ROW - 4;
+    const original = shifted(offset);
+    const cellPatch = patch(2 + offset, 4, '이메일 가입', '이메일로 가입');
+    // 실행 단계(exportImportSource)는 appendBlocked면 새 행 없이 같은 patch로 다시 만든다.
+    const blocked = patchXlsx(original, shiftedLayout(offset), [cellPatch], {}, [newRow(EXCEL_MAX_ROW + 1, ROW_A)]);
+    expect(!blocked.ok && blocked.appendBlocked).toBe(true);
+    const result = ok(patchXlsx(original, shiftedLayout(offset), [cellPatch]));
+    expect(result.changedCells).toEqual([`E${2 + offset}`]);
+    expect(result.appendedRows).toEqual([]);
+    expect(dimensionOf(result.bytes)).toBe(`A${1 + offset}:J${EXCEL_MAX_ROW}`);
+    expect(sheetValues(result.bytes, 'TC')[`E${2 + offset}`]).toBe('이메일로 가입');
+  });
+});

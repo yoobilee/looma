@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planResultSourceExport, planTestAssetSourceExport, sourceExportFileName, SOURCE_EXPORT_UNAVAILABLE, verifySourceExportOutput, withoutAppends, type SourceExportPlan } from './importSourceExport';
-import type { ColumnMapping } from './testAssetImport';
+import { analyzeTestAssetImport, type ColumnMapping } from './testAssetImport';
 import type { ResultColumnMapping } from './testResultImport';
 import type { ImportSourceArtifact, ImportSourceSnapshot, TestAssetImportSession, TestCase, TestResult, TestResultImport } from './types';
 
@@ -439,28 +439,108 @@ describe('신규 TC 새 행 계획', () => {
     ]);
   });
 
-  it('TC ID 없이 쓰는 행은 가져오기와 같은 내용 기준(기능 · 테스트 항목 · Pre-condition · Expected Result)으로 중복을 막는다', () => {
+  it('TC ID 없이 쓰는 행은 파일에 쓰일 값의 내용 기준(기능 · 테스트 항목 · Pre-condition · Expected Result)이 원본 행과 같으면 넣지 않는다', () => {
     // 원본 3행(SIGN-001)과 내용 기준이 같다. 절차가 달라도 ID 없이는 다시 가져올 때 구별할 수 없다.
     const sameAsRow3 = { externalId: undefined, feature: '회원가입', depth: ['회원가입', '이메일'], title: '이메일 가입', precondition: '앱 설치', steps: ['다른 절차'], expectedResult: '가입 완료' };
-    const withIdColumn = readyPlan(
-      planTestAssetSourceExport(session(), artifact(), [newCase('tc-same', sameAsRow3), newCase('tc-x', { externalId: undefined, title: 'X' }), newCase('tc-y', { externalId: undefined, title: 'X', steps: ['다른 절차'] }), newCase('tc-z', { externalId: undefined, title: 'Z' })], APPEND),
-    );
-    expect(withIdColumn.appends.map((append) => [append.rowNumber, append.entityId])).toEqual([[5, 'tc-z']]);
-    expect(reasonsOf(withIdColumn)).toEqual([
-      'tc-same: 원본 파일 3행과 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.',
-      'tc-x: 다른 TC(TC ID 없음 · X)와 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.',
-      'tc-y: 다른 TC(TC ID 없음 · X)와 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 같은 TC인지 구별할 수 없어요.',
-    ]);
-    // 고객사 TC ID가 있으면 ID로 구별되므로 내용이 같아도 넣는다(빈 ID로 ID 기준 중복을 만들지 않는다).
-    const withId = readyPlan(planTestAssetSourceExport(session(), artifact(), [newCase('tc-id', { ...sameAsRow3, externalId: 'SIGN-050' })], APPEND));
-    expect(withId.appends.map((append) => append.cells[0])).toEqual(['SIGN-050']);
-    // TC ID 열이 없는 파일은 모든 행이 ID 없이 쓰이므로 같은 기준을 쓴다.
-    const headers = HEADERS.slice(1);
+    const plan = readyPlan(planTestAssetSourceExport(session(), artifact(), [importedCase(0), importedCase(1), newCase('tc-same', sameAsRow3), newCase('tc-z', { externalId: undefined, title: 'Z' })], APPEND));
+    expect(plan.appends.map((append) => [append.rowNumber, append.entityId])).toEqual([[5, 'tc-z']]);
+    expect(reasonsOf(plan)).toEqual(['tc-same: 원본 파일 3행과 파일에 쓰이는 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요. 고객사 TC ID 없이는 다시 가져올 때 구별할 수 없어요.']);
+    // 원본 행의 TC가 프로젝트에 없어도(다시 가져오기 분석만으로는 잡히지 않아도) 파일 행 기준으로 막는다.
+    expect(reasonsOf(planTestAssetSourceExport(session(), artifact(), [newCase('tc-same', sameAsRow3)], APPEND))[0]).toContain('tc-same: 원본 파일 3행과');
+    // TC ID 열이 없는 파일은 모든 행이 ID 없이 쓰이므로 TC에 ID가 있어도 같은 기준을 쓴다.
     const noIdColumn = readyPlan(
-      planTestAssetSourceExport(session({ sourceSnapshot: snapshot(ROWS.map((row) => row.slice(1)), headers), columnMapping: MAPPING.slice(1) }), artifact(), [newCase('tc-same', { ...sameAsRow3, externalId: 'SIGN-050' }), newCase('tc-z', { title: 'Z' })], APPEND),
+      planTestAssetSourceExport(session({ sourceSnapshot: snapshot(ROWS.map((row) => row.slice(1)), HEADERS.slice(1)), columnMapping: MAPPING.slice(1) }), artifact(), [newCase('tc-same', { ...sameAsRow3, externalId: 'SIGN-050' }), newCase('tc-z', { title: 'Z' })], APPEND),
     );
     expect(noIdColumn.appends.map((append) => [append.entityId, append.missingExternalId])).toEqual([['tc-z', false]]);
     expect(reasonsOf(noIdColumn)[0]).toContain('tc-same: 원본 파일 3행과');
+  });
+
+  it('TC ID 없는 신규 TC끼리 또는 다른 TC와 내용 기준이 같으면 다시 가져올 때 구별할 수 없으므로 겹친 쪽 모두 넣지 않는다', () => {
+    const plan = readyPlan(
+      planTestAssetSourceExport(
+        session(),
+        artifact(),
+        [newCase('tc-x', { externalId: undefined, title: 'X' }), newCase('tc-y', { externalId: undefined, title: 'X', steps: ['다른 절차'] }), newCase('tc-z', { externalId: undefined, title: 'Z' })],
+        APPEND,
+      ),
+    );
+    expect(plan.appends.map((append) => [append.rowNumber, append.entityId])).toEqual([[5, 'tc-z']]);
+    expect(reasonsOf(plan)).toEqual([
+      'tc-x: 다시 가져오면 이 TC와 정확히 이어지지 않아요. 파일에 쓰이는 값 기준으로 같은 내용의 TC가 여럿이라 어느 TC인지 정할 수 없어요.',
+      'tc-y: 다시 가져오면 이 TC와 정확히 이어지지 않아요. 파일에 쓰이는 값 기준으로 같은 내용의 TC가 여럿이라 어느 TC인지 정할 수 없어요.',
+    ]);
+  });
+
+  it('고객사 TC ID가 있는 신규 TC는 내용이 같아도 ID로 구별되므로 넣는다(빈 ID로 ID 기준 중복을 만들지 않는다)', () => {
+    const sameAsRow3 = { feature: '회원가입', depth: ['회원가입', '이메일'], title: '이메일 가입', precondition: '앱 설치', steps: ['다른 절차'], expectedResult: '가입 완료' };
+    const cases = [importedCase(0), importedCase(1), newCase('tc-a', { ...sameAsRow3, externalId: 'SIGN-050' }), newCase('tc-b', { ...sameAsRow3, externalId: 'SIGN-051' })];
+    const plan = readyPlan(planTestAssetSourceExport(session(), artifact(), cases, APPEND));
+    expect(plan.skipped).toEqual([]);
+    expect(plan.appends.map((append) => [append.rowNumber, append.cells[0]])).toEqual([
+      [5, 'SIGN-050'],
+      [6, 'SIGN-051'],
+    ]);
+    const analysis = analyzeTestAssetImport({ headers: HEADERS, rows: [...session().sourceSnapshot!.rows, ...plan.appends.map(({ rowNumber, cells }) => ({ rowNumber, cells }))] }, MAPPING, cases);
+    expect(analysis.rows.slice(2).map((item) => [item.row.rowNumber, item.kind, item.targetId])).toEqual([
+      [5, 'exact_match', 'tc-a'],
+      [6, 'exact_match', 'tc-b'],
+    ]);
+  });
+
+  /* Codex 리뷰 M1: 매핑하지 않은 열 때문에 파일에 쓰일 값이 지금 TC와 달라지는 경우 */
+  describe('매핑하지 않은 열이 있는 파일의 TC ID 없는 신규 TC', () => {
+    const NO_PRE_HEADERS = ['TC ID', '대분류', '테스트 항목', 'Test Step', 'Expected Result'];
+    const NO_PRE_MAPPING: ColumnMapping = ['externalId', 'depth1', 'title', 'steps', 'expectedResult'];
+    const noPreSession = () => session({ sourceSnapshot: snapshot([['SIGN-001', '회원가입', '이메일 가입', '1. 연다', '가입 완료']], NO_PRE_HEADERS), columnMapping: NO_PRE_MAPPING });
+    const login = (id: string, overrides: Partial<TestCase> = {}) => newCase(id, { externalId: undefined, feature: '로그인', depth: ['로그인'], title: '로그인 성공', precondition: undefined, steps: ['로그인한다.'], expectedResult: '홈 이동', ...overrides });
+    const reimport = (plan: SourceExportPlan, cases: TestCase[]) => {
+      const ready = readyPlan(plan);
+      const table = { headers: NO_PRE_HEADERS, rows: [...noPreSession().sourceSnapshot!.rows, ...ready.appends.map(({ rowNumber, cells }) => ({ rowNumber, cells }))] };
+      return analyzeTestAssetImport(table, NO_PRE_MAPPING, cases).rows.map((item) => [item.row.rowNumber, item.kind, item.targetId]);
+    };
+    const NOT_MATCHED = '다시 가져오면 이 TC와 정확히 이어지지 않아요. 고객사 TC ID가 없는 행은 기능 · 테스트 항목 · Pre-condition · Expected Result로 TC를 찾는데, 이 파일에 쓰이는 값(매핑한 열)만으로는 지금 TC와 같지 않아요(매핑하지 않은 열의 값 등).';
+
+    it('Pre-condition만 다른 TC 둘은 같은 행으로 쓰이므로 둘 다 넣지 않는다', () => {
+      const cases = [login('tc-a', { precondition: '조건 A' }), login('tc-b', { precondition: '조건 B' })];
+      const plan = planTestAssetSourceExport(noPreSession(), artifact(), cases, APPEND);
+      expect(readyPlan(plan).appends).toEqual([]);
+      expect(reasonsOf(plan)).toEqual([`tc-a: ${NOT_MATCHED}`, `tc-b: ${NOT_MATCHED}`]);
+    });
+
+    it('Pre-condition이 있는 TC 하나도 다시 가져와 exact_match를 보장할 수 없으면 넣지 않는다', () => {
+      const plan = planTestAssetSourceExport(noPreSession(), artifact(), [login('tc-a', { precondition: '조건 A' })], APPEND);
+      expect(reasonsOf(plan)).toEqual([`tc-a: ${NOT_MATCHED}`]);
+    });
+
+    it('매핑한 열만으로 충분히 유일한 TC는 넣고, 다시 가져오면 그 TC와 exact_match다', () => {
+      const cases = [login('tc-a'), login('tc-b', { title: '로그인 실패', precondition: undefined })];
+      const plan = planTestAssetSourceExport(noPreSession(), artifact(), cases, APPEND);
+      expect(readyPlan(plan).appends.map((append) => [append.rowNumber, append.entityId, append.cells[0], append.missingExternalId])).toEqual([
+        [4, 'tc-a', '', true],
+        [5, 'tc-b', '', true],
+      ]);
+      expect(readyPlan(plan).appends.flatMap((append) => append.cells).join('|')).not.toMatch(/tc-[ab]/);
+      expect(reimport(plan, cases)).toEqual([
+        [3, 'new', undefined],
+        [4, 'exact_match', 'tc-a'],
+        [5, 'exact_match', 'tc-b'],
+      ]);
+    });
+
+    it('파일에 쓰일 값 기준으로 원본 행과 같으면(지금 TC의 전체 값은 달라도) 넣지 않는다', () => {
+      // 원본 3행과 Test Step만 다르다. Pre-condition 열이 없어 두 행의 내용 기준이 같다.
+      const plan = planTestAssetSourceExport(noPreSession(), artifact(), [login('tc-a', { feature: '회원가입', depth: ['회원가입'], title: '이메일 가입', expectedResult: '가입 완료' })], APPEND);
+      expect(reasonsOf(plan)).toEqual([expect.stringContaining('tc-a: 원본 파일 3행과 파일에 쓰이는 기능 · 테스트 항목 · Pre-condition · Expected Result가 같아요.')]);
+    });
+
+    it('지금 TC로는 다르지만 파일에 쓰일 행이 같은 TC 둘(Test Step 열 미매핑)은 둘 다 넣지 않는다', () => {
+      const noStepMapping: ColumnMapping = ['externalId', 'depth1', 'title', null, 'expectedResult'];
+      const cases = [login('tc-a', { steps: ['절차 A'] }), login('tc-b', { steps: ['절차 B'] })];
+      const plan = planTestAssetSourceExport(session({ sourceSnapshot: noPreSession().sourceSnapshot, columnMapping: noStepMapping }), artifact(), cases, APPEND);
+      expect(readyPlan(plan).appends).toEqual([]);
+      expect(reasonsOf(plan).map((reason) => reason.slice(0, 5))).toEqual(['tc-a:', 'tc-b:']);
+      expect(reasonsOf(plan)[0]).toContain('같은 내용의 TC가 여럿');
+    });
   });
 
   it('원본 파일 · 프로젝트에서 고객사 TC ID가 겹치는 TC는 넣지 않는다', () => {

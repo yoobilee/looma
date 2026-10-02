@@ -242,7 +242,7 @@ export interface TestAssetImportAnalysis {
   blankRows: number;
 }
 
-/** 고객사 TC ID가 없을 때 같은 TC를 찾는 내용 기준. 원본 형식 내보내기도 ID 없는 새 행의 중복을 같은 기준으로 막는다. */
+/** 고객사 TC ID가 없을 때 같은 TC를 찾는 내용 기준. 원본 형식 내보내기도 ID 없는 새 행을 같은 기준으로 확인한다. */
 export const compositeKey = (content: { feature?: string; title?: string; precondition?: string; expectedResult?: string }) =>
   [content.feature, content.title, content.precondition, content.expectedResult].map(normalizeText).join('\u0000');
 

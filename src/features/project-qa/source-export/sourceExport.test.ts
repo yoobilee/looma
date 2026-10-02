@@ -626,3 +626,113 @@ describe('신규 TC 새 행 추가 내보내기', () => {
     expect(!outcome.ok && outcome.problems.join(' ')).toContain('5행 TC ID: 새 행에 쓰인 값이 계획한 값과 달라요');
   });
 });
+
+/* ---------- Codex 리뷰 M1 · M2 (실제 파일 → 기존 reader → 다시 가져오기 분석) ---------- */
+
+describe('신규 TC 새 행 추가 · 독립 리뷰 지적 회귀', () => {
+  it('M1: Pre-condition 열을 매핑하지 않은 파일에서는 파일에 쓰일 값으로 그 TC를 정확히 다시 찾을 수 있는 TC만 넣는다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    await editState(store, repos, (data) => {
+      data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
+    });
+    // append-base를 Pre-condition 열 없이(매핑하지 않고) 가져온다.
+    const original = appendFixtureBytes('append-base');
+    const { table, blob } = await readTable(original, 'TC');
+    const mapping = suggestColumnMapping(table.headers).map((field) => (field === 'precondition' ? null : field));
+    const analysis = analyzeTestAssetImport(table, mapping, []);
+    const decisions = analysis.rows.map((item) => ({ rowNumber: item.row.rowNumber, kind: item.kind, targetId: item.targetId, decision: defaultDecisionFor(item)! }));
+    const session = await repos.testAssetImports.apply({ projectId: PROJECT_A, fileName: FIXTURE_NAME, table, mapping, decisions, source: { bytes: blob, format: 'xlsx', sheetName: 'TC' } });
+
+    const login = (id: string, overrides: Partial<TestCase>) =>
+      loomaCase(id, { category: 'normal_flow', feature: '로그인', depth: ['로그인', '이메일'], title: '로그인 성공', precondition: undefined, steps: ['로그인한다.'], expectedResult: '홈 이동', ...overrides });
+    await editState(store, repos, (data) => {
+      data.testCases.push(
+        // Codex 재현: Pre-condition만 다른 TC ID 없는 TC 둘 → 파일에는 같은 행으로 쓰인다.
+        login('tc-pre-a', { precondition: '조건 A' }),
+        login('tc-pre-b', { precondition: '조건 B' }),
+        // 매핑한 열만으로 유일한 TC ID 없는 TC
+        login('tc-unique', { title: '로그인 실패', expectedResult: '오류 안내' }),
+        // 같은 내용이어도 TC ID가 있으면 ID로 구별된다.
+        login('tc-with-id', { externalId: 'MEM-020', precondition: '조건 A' }),
+      );
+    });
+    const stateBefore = JSON.stringify(await store.read());
+
+    const outcome = await exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true });
+    if (!outcome.ok) throw new Error(outcome.problems.join('\n'));
+    expect(outcome.appendedRows).toEqual([
+      { rowNumber: 5, label: 'TC ID 없음 · 로그인 실패' },
+      { rowNumber: 6, label: 'MEM-020 · 로그인 성공' },
+    ]);
+    expect(outcome.skipped.map(({ entityId, reason }) => [entityId, reason.includes('매핑한 열')])).toEqual([
+      ['tc-pre-a', true],
+      ['tc-pre-b', true],
+    ]);
+    const allParts = Object.values(unzipSync(outcome.bytes)).map((bytes) => strFromU8(bytes)).join('\n');
+    expect(allParts).not.toMatch(/tc-(pre|unique|with)/);
+
+    // 내보낸 파일 → 기존 reader → 다시 가져오기 분석: 붙인 행은 모두 그 TC와 exact_match, 오류 행 없음
+    const reread = (await readTable(outcome.bytes, 'TC')).table;
+    expect(reread.rows.slice(3).map((row) => [row.rowNumber, row.cells[0], row.cells[4], row.cells[5]])).toEqual([
+      [5, '', '로그인 실패', ''],
+      [6, 'MEM-020', '로그인 성공', ''],
+    ]);
+    const again = analyzeTestAssetImport(reread, mapping, await repos.testCases.listByProject(PROJECT_A));
+    expect(again.rows.flatMap((item) => item.issues.filter((issue) => issue.level === 'error'))).toEqual([]);
+    expect(again.rows.slice(3).map((item) => [item.row.rowNumber, item.kind, item.targetId])).toEqual([
+      [5, 'exact_match', 'tc-unique'],
+      [6, 'exact_match', 'tc-with-id'],
+    ]);
+    expect(JSON.stringify(await store.read())).toBe(stateBefore);
+    expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
+  });
+
+  it('M2: 마지막 TC 행이 1,048,576이면 신규 TC를 넣지 않고 기존 행 수정만 한 파일을 만들며, 화면 결과 수가 파일과 같다', async () => {
+    const store = createMemoryStateStore();
+    const repos = await openRepos(store);
+    // append-base의 행을 내려 헤더 1,048,573행 · TC 1,048,574~1,048,576행으로 만든다.
+    const offset = 1048572;
+    const files = unzipSync(appendFixtureBytes('append-base'));
+    files['xl/worksheets/sheet2.xml'] = strToU8(
+      strFromU8(files['xl/worksheets/sheet2.xml'])
+        .replace(/<row r="(\d+)"/g, (_, row: string) => `<row r="${Number(row) + offset}"`)
+        .replace(/<c r="([A-Z]+)(\d+)"/g, (_, column: string, row: string) => `<c r="${column}${Number(row) + offset}"`)
+        .replace('<dimension ref="A1:J4"/>', `<dimension ref="A${1 + offset}:J${4 + offset}"/>`),
+    );
+    await editState(store, repos, (data) => {
+      data.testCases = data.testCases.filter((item) => item.projectId !== PROJECT_A);
+    });
+    const { original, session } = await importTestAssets(repos, zipSync(files));
+    expect(session.sourceSnapshot!.rows.map((row) => row.rowNumber)).toEqual([1048574, 1048575, 1048576]);
+    await editState(store, repos, (data) => {
+      data.testCases.push(loomaCase('tc-looma-1', { externalId: 'MEM-010' }));
+      data.testCases.find((item) => item.importSource?.sessionId === session.id && item.importSource.rowNumber === 1048574)!.title = '이메일로 가입';
+    });
+
+    const download = vi.fn();
+    const state = await runSourceExport(() => exportTestAssetSource(PROJECT_A, session.id, { repos, appendNewTestCases: true }), download);
+    expect(state).toEqual({
+      status: 'done',
+      message: '고객사_TC_Looma.xlsx · 셀 1개에 현재 값을 반영했어요.',
+      notices: [],
+      rows: {
+        updatedRows: 1,
+        appendedRows: 0,
+        skipped: [{ entityId: 'tc-looma-1', label: 'MEM-010 · 카카오 가입 취소 & <확인>', reason: '새 행(1048577~1048577행)이 Excel 시트의 최대 행(1,048,576행)을 넘어 추가할 수 없어요.' }],
+      },
+    });
+    // 내려받은 파일: 기존 행만 바뀌고, 최대 행을 넘는 행 · dimension은 없다.
+    const bytes: Uint8Array = download.mock.calls[0][0];
+    const sheetXml = strFromU8(unzipSync(bytes)['xl/worksheets/sheet2.xml']);
+    expect(sheetXml).toContain(`<dimension ref="A${1 + offset}:J${4 + offset}"/>`);
+    expect(sheetXml).not.toContain('1048577');
+    const reread = (await readTable(bytes, 'TC')).table;
+    expect(reread.rows.map((row) => [row.rowNumber, row.cells[4]])).toEqual([
+      [1048574, '이메일로 가입'],
+      [1048575, '약관 미동의 & <필수>'],
+      [1048576, '비밀번호 8자'],
+    ]);
+    expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
+  });
+});

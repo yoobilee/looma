@@ -482,6 +482,10 @@ function planAppend(source: string, worksheet: XmlElement, structure: SheetStruc
   const first = appends[0].rowNumber;
   const lastNew = appends[appends.length - 1].rowNumber;
   if (appends.some((item, index) => item.rowNumber !== first + index)) throw new AppendBlocked(['새 행 번호가 이어지지 않아요.']);
+  // 모든 새 행이 Excel 시트의 행 범위(1 ~ MAX_ROW) 안이어야 한다. 하나라도 넘으면 일부만 붙이지 않고 전부 붙이지 않는다.
+  if (!Number.isInteger(first) || first < 1 || lastNew > MAX_ROW) {
+    throw new AppendBlocked([`새 행(${first}~${lastNew}행)이 Excel 시트의 최대 행(${MAX_ROW.toLocaleString('ko-KR')}행)을 넘어 추가할 수 없어요.`]);
+  }
 
   // 위치: 시트의 마지막 행(값 없는 서식 행 포함)이 새 행 바로 위의 TC 행이어야 한다.
   const rowNumbers = [...structure.rows.keys()];
