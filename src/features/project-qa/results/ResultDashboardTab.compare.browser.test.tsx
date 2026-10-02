@@ -6,6 +6,7 @@ import { page, userEvent } from 'vitest/browser';
 import '@/styles/tokens.css';
 import '@/styles/base.css';
 import { createLocalRepositories } from '@/data/local/localRepositories';
+import type { AppData, StoredAppState } from '@/data/local/appData';
 import { createMemoryStateStore } from '@/data/local/stateStore';
 import { PROJECT_A } from '@/data/mock/seed';
 import type { Repositories } from '@/data/repositories/types';
@@ -37,10 +38,15 @@ let router: ReturnType<typeof createBrowserRouter> | undefined;
 const originalUrl = `${location.pathname}${location.search}`;
 
 /** 결과 화면을 주소(search)와 함께 띄운다. 주소 이동은 실제 브라우저 history를 쓴다. */
-async function mount(search: string) {
-  const store = createMemoryStateStore();
-  const repos = createLocalRepositories({ openStore: async () => store });
+async function mount(search: string, { bulk = 0 }: { bulk?: number } = {}) {
+  let store = createMemoryStateStore();
+  let repos = createLocalRepositories({ openStore: async () => store });
   await repos.persistence.load();
+  if (bulk > 0) {
+    store = createMemoryStateStore(await withBulkRows(store, bulk));
+    repos = createLocalRepositories({ openStore: async () => store });
+    await repos.persistence.load();
+  }
   holder.repos = repos;
   const project = (await repos.projects.get(PROJECT_A))!;
   history.replaceState(null, '', `${location.pathname}${search}`);
@@ -64,12 +70,33 @@ afterEach(async () => {
   history.replaceState(null, '', originalUrl);
 });
 
+const bulkId = (index: number) => `BULK-${String(index).padStart(3, '0')}`;
+
+/**
+ * 예시 데이터에 TC를 count개 더하고, 1차 Android PASS → 2차 Android FAIL 결과를 넣는다.
+ * 비교 목록이 한 번에 보여 주는 100건을 넘겨 '더 보기'를 확인하려고 쓴다.
+ */
+async function withBulkRows(store: ReturnType<typeof createMemoryStateStore>, count: number) {
+  const stored = (await store.read()) as StoredAppState;
+  const data = stored.data as AppData;
+  const sample = data.testCases.find((item) => item.projectId === PROJECT_A)!;
+  for (let index = 1; index <= count; index += 1) {
+    const id = `tc-bulk-${index}`;
+    data.testCases.push({ ...sample, id, externalId: bulkId(index), title: `대량 항목 ${index}` });
+    for (const [importId, result] of [[ROUND_1, 'pass'], [ROUND_2, 'fail']] as const) {
+      data.results.push({ id: `${importId}-bulk-${index}`, importId, testCaseId: id, externalId: bulkId(index), feature: sample.feature, title: `대량 항목 ${index}`, platform: 'android', result });
+    }
+  }
+  return stored;
+}
+
+const SAMPLE_ROWS = [
+  ['SIGN-001', '유효한 비밀번호 입력 시 가입 가능', 'F', 'F'],
+  ['LOGIN-018', '실패 횟수 정책', 'P', 'P'],
+];
+
 /** 고객사 결과 파일 한 장(TC ID · 테스트 항목 · Android · iOS)을 실제 가져오기와 같은 흐름으로 가져온다. */
-async function importRound(repos: Repositories, round: number, executionType: ExecutionType = 'retest') {
-  const rows = [
-    ['SIGN-001', '유효한 비밀번호 입력 시 가입 가능', 'F', 'F'],
-    ['LOGIN-018', '실패 횟수 정책', 'P', 'P'],
-  ];
+async function importRound(repos: Repositories, round: number, executionType: ExecutionType = 'retest', rows: string[][] = SAMPLE_ROWS) {
   const table: ImportTable = { headers: ['TC ID', '테스트 항목', 'Android', 'iOS'], rows: rows.map((cells, index) => ({ rowNumber: index + 2, cells })) };
   const mapping: ResultColumnMapping = suggestResultColumnMapping(table.headers).map((field, index) => field ?? (['result_android', 'result_ios'] as const)[index - 2] ?? null);
   const template = await repos.templates.get('tpl-client-a');
@@ -229,5 +256,93 @@ describe('수행 결과 비교 화면 · 차수 선택과 주소 · 가져오기
 
     expect(store.inspect()).toEqual(before);
     expect(repos.persistence.getStatus()).toBe(status);
+  });
+});
+
+describe('수행 결과 비교 화면 · 목록 더 보기(100건씩)', () => {
+  const BULK = 250;
+  const rowCount = (view: HTMLElement) => view.querySelectorAll('tbody tr').length;
+  const showMore = () => userEvent.click(page.getByRole('button', { name: /건 더 보기/ }));
+  /** 처음 100건에서 '더 보기'로 200건까지 펼친다. */
+  async function expandTo200(view: HTMLElement) {
+    await expect.poll(() => rowCount(view)).toBe(100);
+    await showMore();
+    await expect.poll(() => rowCount(view)).toBe(200);
+  }
+  const bulkRows = Array.from({ length: BULK }, (_, index) => [bulkId(index + 1), `대량 항목 ${index + 1}`, 'F', 'F']);
+
+  it('A에서 200건까지 펼친 뒤 B로 갔다가 A로 돌아오면 A도 다시 100건부터다(주소 이동)', async () => {
+    const { view } = await mount(compareUrl(ROUND_1, ROUND_2), { bulk: BULK });
+    await expandTo200(view);
+
+    // 같은 비교에서 상관없는 주소 값만 바뀌면 펼친 건수를 유지한다.
+    await navigate(`${compareUrl(ROUND_1, ROUND_2)}&memo=1`);
+    expect(location.search).toContain('memo=1');
+    expect(rowCount(view)).toBe(200);
+
+    await navigate(compareUrl(ROUND_2, ROUND_1));
+    await expect.poll(() => shown(view).base).toBe(ROUND_2);
+    expect(rowCount(view)).toBe(100);
+
+    await navigate(compareUrl(ROUND_1, ROUND_2));
+    await expect.poll(() => shown(view).base).toBe(ROUND_1);
+    expect(rowCount(view)).toBe(100);
+  });
+
+  it('뒤로 · 앞으로 가서 비교하는 두 차수가 바뀌면 100건부터다(A → B → 뒤로 A)', async () => {
+    const { view } = await mount(compareUrl(ROUND_1, ROUND_2), { bulk: BULK });
+    await expandTo200(view);
+    await navigate(compareUrl(ROUND_2, ROUND_1));
+    await expect.poll(() => shown(view).base).toBe(ROUND_2);
+    expect(rowCount(view)).toBe(100);
+
+    history.back();
+    await expect.poll(() => shown(view).base).toBe(ROUND_1);
+    expect(rowCount(view)).toBe(100);
+    await expandTo200(view);
+
+    history.forward();
+    await expect.poll(() => shown(view).base).toBe(ROUND_2);
+    expect(rowCount(view)).toBe(100);
+  });
+
+  it('같은 비교에서 저장소가 다시 알려도 펼친 건수를 유지하고, 차수를 직접 고르면(A → C → A) 100건부터다', async () => {
+    const { repos, view } = await mount(compareUrl(ROUND_1, ROUND_2), { bulk: BULK });
+    await expandTo200(view);
+
+    // 고른 차수는 새 차수를 가져와도 그대로다. 저장소 알림으로 다시 그려도 200건이다.
+    const three = await importRound(repos, 3, 'retest', bulkRows);
+    await expect.poll(() => select('비교 차수').options.length).toBe(3);
+    expect(shown(view).target).toBe(ROUND_2);
+    expect(rowCount(view)).toBe(200);
+
+    await userEvent.selectOptions(select('비교 차수'), three);
+    await expect.poll(() => shown(view).target).toBe(three);
+    expect(rowCount(view)).toBe(100);
+
+    await userEvent.selectOptions(select('비교 차수'), ROUND_2);
+    await expect.poll(() => shown(view).target).toBe(ROUND_2);
+    expect(rowCount(view)).toBe(100);
+  });
+
+  it('자동 선택 중 새 차수를 가져와 비교하는 두 차수가 바뀌면 100건부터다', async () => {
+    const { repos, view } = await mount('?view=compare', { bulk: BULK });
+    await expandTo200(view);
+
+    const three = await importRound(repos, 3, 'retest', bulkRows);
+    await expect.poll(() => shown(view).target).toBe(three);
+    expect(shown(view).base).toBe(ROUND_2);
+    expect(rowCount(view)).toBe(100);
+  });
+
+  it('필터 · 변화 없음 포함을 바꾸면 100건부터다', async () => {
+    const { view } = await mount(compareUrl(ROUND_1, ROUND_2), { bulk: BULK });
+    await expandTo200(view);
+    await userEvent.click(page.getByRole('button', { name: /^신규 실패 ?\d+$/ }));
+    await expect.poll(() => rowCount(view)).toBe(100);
+    await showMore();
+    await expect.poll(() => rowCount(view)).toBe(200);
+    await userEvent.click(page.getByLabelText('변화 없음 포함'));
+    await expect.poll(() => rowCount(view)).toBe(100);
   });
 });
