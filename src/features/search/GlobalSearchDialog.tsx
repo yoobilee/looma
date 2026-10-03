@@ -11,7 +11,7 @@ interface GlobalSearchDialogProps {
   onClose: () => void;
 }
 
-/** 기본 검색 UI. 업무·프로젝트·TC·업무 지식·임시 자료를 한 번에 찾는다. */
+/** 기본 검색 UI. 업무·프로젝트·TC·기록·업무 지식·임시 자료를 한 번에 찾는다. */
 export function GlobalSearchDialog({ open, onClose }: GlobalSearchDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const [query, setQuery] = useState('');
@@ -27,6 +27,7 @@ export function GlobalSearchDialog({ open, onClose }: GlobalSearchDialogProps) {
         testCases,
         terms: await repos.knowledge.list(),
         scratch: await repos.scratch.list(),
+        activities: await repos.activities.list(),
       };
     },
     [],
@@ -64,7 +65,7 @@ export function GlobalSearchDialog({ open, onClose }: GlobalSearchDialogProps) {
             className={styles.input}
             type="search"
             value={query}
-            placeholder="업무, 프로젝트, TC, 용어, 임시 자료 검색"
+            placeholder="업무, 프로젝트, TC, 기록, 용어, 임시 자료 검색"
             aria-label="검색어"
             autoFocus
             onChange={(event) => setQuery(event.target.value)}
