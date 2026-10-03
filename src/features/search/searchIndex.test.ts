@@ -80,6 +80,7 @@ describe('전역 검색: 기록 결과의 이동 위치', () => {
     ['test_case_changed', { testCaseId: 'tc-a' }, `${base}/test-design?tc=tc-a`],
     ['test_assets_imported', { testAssetImportId: 'tai-a' }, `${base}/import-history?assetImport=tai-a`],
     ['deliverable_added', { deliverableId: 'dlv-a' }, `${base}?deliverable=dlv-a`],
+    ['requirements_imported', { deliverableId: 'dlv-a' }, `${base}/requirements`],
     ['requirements_analyzed', { analysisId: 'cia-a' }, `${base}/test-design`],
     ['changes_applied', { analysisId: 'cia-a' }, `${base}/test-design`],
   ] as [ActivityType, Record<string, string>, string][])('%s는 기존 원본 링크 정책을 따른다 → %s', (type, metadata, to) => {
@@ -114,5 +115,7 @@ describe('전역 검색: 기록 결과의 이동 위치', () => {
     // 옛 기록은 기록 화면으로 가므로 테스트 설계라고 쓰지 않는다.
     expect(metaOf(activity('고유제목', 'requirements_analyzed', { title: '고유제목', metadata: { detail: '기능 3 · 확인 필요 4' } }))).toBe(`${projectName(PROJECT_A)} · 기능 3 · 확인 필요 4`);
     expect(metaOf(activity('고유제목', 'issue_created', { title: '고유제목', metadata: { detail: '결함', issueId: 'issue-a' } }))).toBe(`${projectName(PROJECT_A)} · 결함`);
+    // 요구사항 가져오기는 요구사항 탭에서 가져온 요구사항을 모두 보여주므로 이동 문구를 붙이지 않는다.
+    expect(metaOf(activity('고유제목', 'requirements_imported', { title: '고유제목', metadata: { detail: '신규 2 · 중복 1 · 오류 0 · 제외 0', deliverableId: 'dlv-a' } }))).toBe(`${projectName(PROJECT_A)} · 신규 2 · 중복 1 · 오류 0 · 제외 0`);
   });
 });

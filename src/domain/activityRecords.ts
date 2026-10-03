@@ -11,6 +11,7 @@ export type ActivityCategoryFilter = 'all' | ActivityCategory;
 export const activityCategory: Record<ActivityType, ActivityCategory> = {
   deliverable_added: 'deliverables',
   requirements_analyzed: 'deliverables',
+  requirements_imported: 'deliverables',
   changes_applied: 'deliverables',
   test_case_changed: 'testCases',
   test_assets_imported: 'testCases',
@@ -62,6 +63,8 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
   test_assets_imported: { key: 'testAssetImportId', path: (base, id) => `${base}/import-history?assetImport=${encodeURIComponent(id)}` },
   deliverable_added: { key: 'deliverableId', path: (base, id) => `${base}?deliverable=${encodeURIComponent(id)}` },
   changes_applied: { key: 'analysisId', path: (base) => `${base}/test-design` },
+  // 요구사항 가져오기. 가져온 요구사항은 요구사항 탭에 모두 있으므로 그 탭으로 간다.
+  requirements_imported: { key: 'deliverableId', path: (base) => `${base}/requirements` },
   // 변경 분석 검토 완료. 반영과 같은 분석을 가리키므로 같은 key · 같은 탭이다.
   requirements_analyzed: { key: 'analysisId', path: (base) => `${base}/test-design` },
 };

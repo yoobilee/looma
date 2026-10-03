@@ -9,6 +9,7 @@ import {
   requirementChangeNeedsDecision,
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
+import { analyzeRequirementImport, planRequirementImport, requirementColumnMappingProblems, requirementImportSummaryText, RequirementImportError } from '@/domain/requirementImport';
 import { importSourceMimeType, toImportSourceSnapshot } from '@/domain/importSource';
 import { applyIssueChanges, buildIssue } from '@/domain/issues';
 import { analyzeTestAssetImport, planTestAssetImport, type ImportTable } from '@/domain/testAssetImport';
@@ -448,6 +449,29 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
     requirements: {
       async listByProject(projectId) {
         return copy(db.requirements.filter((item) => item.projectId === projectId));
+      },
+      importFromTable: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
+          const { projectId } = input;
+          if (!draft.projects.some((item) => item.id === projectId)) throw notFound('프로젝트', projectId);
+          if (!draft.deliverables.some((item) => item.id === input.deliverableId && item.projectId === projectId)) throw notFound('산출물', input.deliverableId);
+          const [problem] = requirementColumnMappingProblems(input.table.headers, input.mapping);
+          if (problem) throw new RequirementImportError(problem);
+          // 미리보기와 같은 규칙으로 현재 요구사항 기준 판정을 다시 계산한다. 먼저 전부 계산하고 검증하며, 여기서 실패하면 아무것도 저장하지 않는다.
+          const analysis = analyzeRequirementImport(
+            input.table,
+            input.mapping,
+            draft.requirements.filter((item) => item.projectId === projectId),
+          );
+          const plan = planRequirementImport(analysis, input.excludedRows, { projectId, deliverableId: input.deliverableId, createId });
+          draft.requirements.push(...plan.requirements);
+          record(draft, 'requirements_imported', `${input.fileName} 요구사항 ${plan.summary.created}건 가져오기`, {
+            projectId,
+            metadata: { detail: requirementImportSummaryText(plan.summary), deliverableId: input.deliverableId },
+          });
+          return { requirements: plan.requirements, summary: plan.summary };
+        });
       },
     },
 

@@ -31,6 +31,7 @@ import type {
   TestScope,
 } from '@/domain/types';
 import type { IssueChanges } from '@/domain/issues';
+import type { RequirementColumnMapping, RequirementImportSummary } from '@/domain/requirementImport';
 import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/domain/testAssetImport';
 import type { ResultColumnMapping, ResultCycleInput, ResultImportRowDecision, ResultValueDecision } from '@/domain/testResultImport';
 
@@ -88,8 +89,24 @@ export interface DeliverableRepository {
   create(input: CreateDeliverableInput): Promise<Deliverable>;
 }
 
+export interface ImportRequirementsInput {
+  projectId: string;
+  /** 새 요구사항의 근거(sourceRefs)가 가리킬 이 프로젝트의 산출물 */
+  deliverableId: string;
+  fileName: string;
+  table: ImportTable;
+  mapping: RequirementColumnMapping;
+  /** 새 요구사항이 될 수 있지만 사용자가 뺀 행 번호 */
+  excludedRows: number[];
+}
+
 export interface RequirementRepository {
   listByProject(projectId: string): Promise<Requirement[]>;
+  /**
+   * 요구사항 파일의 표를 현재 요구사항 기준으로 다시 판정해 새 요구사항만 한 번에 만든다. 기존 요구사항은 바꾸지 않는다.
+   * 만들 요구사항이 없거나 하나라도 문제가 있으면 아무것도 저장하지 않는다. 활동 기록도 같은 저장에 남는다.
+   */
+  importFromTable(input: ImportRequirementsInput): Promise<{ requirements: Requirement[]; summary: RequirementImportSummary }>;
 }
 
 export interface TemplateRepository {
