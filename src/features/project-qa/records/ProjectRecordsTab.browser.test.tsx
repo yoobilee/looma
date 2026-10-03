@@ -193,6 +193,38 @@ describe('프로젝트 기록 탭', () => {
     await expect.poll(() => view.textContent).toContain('모바일_개편_기획_v99.pdf');
   });
 
+  it('테스트 설계에서 검토 완료 · 반영하면 기록에 별개의 두 활동이 남고, 검토 완료는 산출물·변경에 제목 평문 + "테스트 설계 보기"로 보인다', async () => {
+    const reviewTitle = '모바일_개편_기획_v1.5.pdf 변경 분석 검토 완료';
+    const applyTitle = '모바일_개편_기획_v1.5.pdf 변경사항 반영';
+    const view = await mount([]);
+    const repos = holder.repos!;
+    // 판단은 저장소로 채우고, 검토 완료 · 반영은 화면 버튼으로 한다.
+    for (const id of ['rc-001', 'rc-002', 'rc-003']) await repos.changeAnalyses.updateRequirementDecision('cia-plan-v15', id, 'accepted');
+    for (const id of ['ti-001', 'ti-002', 'ti-003', 'ti-004', 'ti-006']) await repos.changeAnalyses.updateTestImpactDecision('cia-plan-v15', id, 'accepted');
+    await repos.changeAnalyses.resolveDuplicate('cia-plan-v15', 'ti-007', 'modify_existing');
+
+    await act(async () => router!.navigate(`/projects/${PROJECT_A}/test-design`));
+    await userEvent.click(page.getByRole('button', { name: '검토 완료' }));
+    await expect.poll(() => page.getByRole('button', { name: '변경사항 반영' }).elements().length).toBe(1);
+
+    await act(async () => router!.navigate(`/projects/${PROJECT_A}/records?type=deliverables`));
+    await expect.poll(() => titles(view)).toEqual([reviewTitle]);
+    expect(view.textContent).toContain('요구사항 변경 3건 · TC 영향 6건');
+    expect(page.getByRole('link', { name: reviewTitle }).elements()).toHaveLength(0);
+    const action = page.getByRole('link', { name: '테스트 설계 보기' });
+    expect(action.element().getAttribute('href')).toBe(`/projects/${PROJECT_A}/test-design`);
+    await userEvent.click(action);
+    await expect.poll(() => router!.state.location.pathname).toBe(`/projects/${PROJECT_A}/test-design`);
+
+    await userEvent.click(page.getByRole('button', { name: '변경사항 반영' }));
+    await userEvent.click(page.getByRole('button', { name: '반영', exact: true }));
+    await expect.poll(() => view.textContent).toContain('반영 완료');
+
+    await act(async () => router!.navigate(`/projects/${PROJECT_A}/records?type=deliverables`));
+    await expect.poll(() => titles(view)).toEqual([applyTitle, reviewTitle]);
+    expect(page.getByRole('link', { name: '테스트 설계 보기' }).elements()).toHaveLength(2);
+  });
+
   it('390px에서 가로로 넘치지 않는다(긴 링크 제목 포함)', async () => {
     await page.viewport(390, 844);
     const longLinked = activity('아주긴링크제목'.repeat(20), '2026-10-01T14:00:00.000Z', { type: 'results_uploaded', metadata: { resultImportId: 'imp-a-2' } });

@@ -61,6 +61,8 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
   test_assets_imported: { key: 'testAssetImportId', path: (base) => `${base}/import-history` },
   deliverable_added: { key: 'deliverableId', path: (base) => base },
   changes_applied: { key: 'analysisId', path: (base) => `${base}/test-design` },
+  // 변경 분석 검토 완료. 반영과 같은 분석을 가리키므로 같은 key · 같은 탭이다.
+  requirements_analyzed: { key: 'analysisId', path: (base) => `${base}/test-design` },
 };
 
 /**
@@ -69,6 +71,7 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
  */
 const tabLinkLabels: Partial<Record<ActivityType, string>> = {
   changes_applied: '테스트 설계 보기',
+  requirements_analyzed: '테스트 설계 보기',
 };
 
 export const activityLinkLabel = (activity: Activity): string | undefined => tabLinkLabels[activity.type];

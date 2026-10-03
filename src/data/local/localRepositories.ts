@@ -1,6 +1,7 @@
 import type { Activity, ActivityType, ImportSourceArtifact, ScratchItem } from '@/domain/types';
 import { executionTypeLabel, issueStatusLabel, issueTypeLabel, platformLabel, testCaseStatusLabel, testResultLabel } from '@/domain/labels';
 import {
+  changeReviewSummaryText,
   decisionConflictMessage,
   decisionConflicts,
   pendingDecisionCount,
@@ -507,6 +508,12 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           if (conflicts.length > 0) throw new Error(decisionConflictMessage(conflicts.length));
           analysis.status = 'reviewed';
           analysis.reviewedAt = nowIso();
+          // draft에서만 여기까지 오므로 한 분석에 검토 완료 기록은 하나다.
+          const target = draft.deliverables.find((item) => item.id === analysis.targetDeliverableId);
+          record(draft, 'requirements_analyzed', `${target?.title ?? '산출물'} 변경 분석 검토 완료`, {
+            projectId: analysis.projectId,
+            metadata: { detail: changeReviewSummaryText(analysis), analysisId: analysis.id },
+          });
           return analysis;
         }),
       apply: (analysisId) =>
