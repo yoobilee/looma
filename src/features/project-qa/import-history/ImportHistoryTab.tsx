@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
 import {
   buildImportHistory,
@@ -13,6 +13,7 @@ import { resultImportSummaryText } from '@/domain/testResultImport';
 import { executionTypeLabel, platformLabel } from '@/domain/labels';
 import type { ImportSourceFormat } from '@/domain/types';
 import { formatDateTime } from '@/lib/date';
+import { revealElement } from '@/lib/revealElement';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Tag } from '@/components/ui/Tag';
@@ -31,11 +32,11 @@ function resultMeta(item: ResultImportHistoryItem): string[] {
   return [period, item.environment, item.platform && platformLabel[item.platform]].filter((value): value is string => !!value);
 }
 
-function HistoryRow({ item, base, sourceFormat }: { item: ImportHistoryItem; base: string; sourceFormat?: ImportSourceFormat }) {
+function HistoryRow({ item, base, sourceFormat, selected }: { item: ImportHistoryItem; base: string; sourceFormat?: ImportSourceFormat; selected: boolean }) {
   const isResult = item.type === 'result';
   const meta = isResult ? resultMeta(item) : [`총 ${item.totalRows}행`];
   return (
-    <li className={styles.item}>
+    <li className={`${styles.item} ${selected ? styles.selected : ''}`} aria-current={selected ? 'true' : undefined} ref={selected ? revealElement : undefined}>
       <div className={styles.head}>
         <Tag tone={isResult ? 'coral' : 'sky'}>{isResult ? '수행 결과 가져오기' : 'TC 가져오기'}</Tag>
         <time className={styles.time} dateTime={item.importedAt}>
@@ -43,6 +44,7 @@ function HistoryRow({ item, base, sourceFormat }: { item: ImportHistoryItem; bas
         </time>
       </div>
       <p className={styles.title}>
+        {selected && <span className="visually-hidden">선택한 가져오기: </span>}
         {isResult && <span>{`${item.round}차 · ${executionTypeLabel[item.executionType]}`} · </span>}
         <span className={styles.fileName}>{item.fileName}</span>
       </p>
@@ -63,6 +65,14 @@ function HistoryRow({ item, base, sourceFormat }: { item: ImportHistoryItem; bas
 export function ImportHistoryTab() {
   const { project } = useProjectContext();
   const [filter, setFilter] = useState<ImportHistoryFilter>('all');
+  // 기록 등에서 `?assetImport=<TC 가져오기 id>`로 들어오면 그 가져오기를 표시한다. 수행 결과 차수의 `?import=`와 섞이지 않게 TC 가져오기만 가리킨다.
+  const linkedId = useSearchParams()[0].get('assetImport');
+  // 주소의 대상이 바뀌면 그 항목이 가려지지 않도록 전체 보기로 한 번 맞춘다(effect 없이 렌더 중 비교).
+  const [appliedLinkedId, setAppliedLinkedId] = useState(linkedId);
+  if (linkedId !== appliedLinkedId) {
+    setAppliedLinkedId(linkedId);
+    if (linkedId) setFilter('all');
+  }
   const base = `/projects/${project.id}`;
 
   const data = useRepositoryData(
@@ -117,7 +127,13 @@ export function ImportHistoryTab() {
       ) : (
         <ul className={styles.list}>
           {visible.map((item) => (
-            <HistoryRow key={`${item.type}-${item.id}`} item={item} base={base} sourceFormat={item.artifactId ? formatByArtifact[item.artifactId] : undefined} />
+            <HistoryRow
+              key={`${item.type}-${item.id}`}
+              item={item}
+              base={base}
+              sourceFormat={item.artifactId ? formatByArtifact[item.artifactId] : undefined}
+              selected={!!linkedId && item.type === 'asset' && item.id === linkedId}
+            />
           ))}
         </ul>
       )}

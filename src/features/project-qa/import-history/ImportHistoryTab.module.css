@@ -82,3 +82,10 @@
   color: var(--color-muted);
   overflow-wrap: anywhere;
 }
+
+/* 주소로 선택한 가져오기. 두꺼운 테두리로 색 없이도 구분된다. */
+.selected {
+  border-color: var(--color-sky);
+  box-shadow: inset 0 0 0 1px var(--color-sky);
+  background: var(--color-sky-softer);
+}

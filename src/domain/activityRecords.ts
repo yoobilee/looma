@@ -49,7 +49,7 @@ export function matchesActivityCategory(activity: Activity, filter: ActivityCate
 
 /**
  * 활동 종류별로 원본 ID를 담는 metadata key와 그 ID로 갈 프로젝트 안 경로.
- * 개별 항목을 여는 주소가 있는 화면만 ID를 query로 넘기고, 없는 화면(산출물 · 가져오기 이력 · 변경 분석)은 탭까지만 간다.
+ * 항목을 표시하는 화면은 ID를 query로 넘기고, 없는 화면(변경 분석)은 탭까지만 간다.
  * 변경 분석은 테스트 설계 탭 안에 있다. 여기 없는 종류는 링크가 없다.
  */
 const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: string, id: string) => string }>> = {
@@ -58,8 +58,9 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
   issue_resolved: { key: 'issueId', path: (base, id) => `${base}/issues?issue=${encodeURIComponent(id)}` },
   results_uploaded: { key: 'resultImportId', path: (base, id) => `${base}/results?import=${encodeURIComponent(id)}` },
   test_case_changed: { key: 'testCaseId', path: (base, id) => `${base}/test-design?tc=${encodeURIComponent(id)}` },
-  test_assets_imported: { key: 'testAssetImportId', path: (base) => `${base}/import-history` },
-  deliverable_added: { key: 'deliverableId', path: (base) => base },
+  // 가져오기 이력은 TC 가져오기 id를 `assetImport`로 받는다(`import`는 수행 결과 차수라 쓰지 않는다). 산출물은 프로젝트 첫 화면이 `deliverable`을 받는다.
+  test_assets_imported: { key: 'testAssetImportId', path: (base, id) => `${base}/import-history?assetImport=${encodeURIComponent(id)}` },
+  deliverable_added: { key: 'deliverableId', path: (base, id) => `${base}?deliverable=${encodeURIComponent(id)}` },
   changes_applied: { key: 'analysisId', path: (base) => `${base}/test-design` },
   // 변경 분석 검토 완료. 반영과 같은 분석을 가리키므로 같은 key · 같은 탭이다.
   requirements_analyzed: { key: 'analysisId', path: (base) => `${base}/test-design` },

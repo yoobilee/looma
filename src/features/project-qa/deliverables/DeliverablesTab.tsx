@@ -1,10 +1,11 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 import { useNow } from '@/hooks/useNow';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
 import { deliverableTypeBadge, deliverableTypeLabel, projectStageLabel, projectStageOrder } from '@/domain/labels';
 import type { Deliverable, ProjectStage } from '@/domain/types';
 import { formatMonthDay } from '@/lib/date';
+import { revealElement } from '@/lib/revealElement';
 import { ButtonLink, Button } from '@/components/ui/Button';
 import { SectionHeader } from '@/components/ui/SectionHeader';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
@@ -25,6 +26,8 @@ export function DeliverablesTab() {
   const { project, openDeliverableCreate } = useProjectContext();
   const projectPath = `/projects/${project.id}`;
   const now = useNow();
+  // 기록 등에서 `?deliverable=<id>`로 들어오면 그 산출물을 표시한다. 이 프로젝트의 산출물이 아니면 아무것도 고르지 않는다.
+  const selectedId = useSearchParams()[0].get('deliverable');
   const data = useRepositoryData(
     async (repos) => ({
       deliverables: await repos.deliverables.listByProject(project.id),
@@ -70,6 +73,7 @@ export function DeliverablesTab() {
         ) : (
           <ul className={styles.list}>
             {deliverables.map((deliverable) => {
+              const selected = !!selectedId && deliverable.id === selectedId;
               const action = nextActionFor(deliverable, projectPath, overview.hasTemplate);
               const featureCount = new Set(requirements.filter((item) => item.sourceRefs.some((ref) => ref.deliverableId === deliverable.id)).map((item) => item.feature)).size;
               const confirmCount = requirements.filter((item) => item.needsConfirmation && item.sourceRefs.some((ref) => ref.deliverableId === deliverable.id)).length;
@@ -81,12 +85,18 @@ export function DeliverablesTab() {
                 `${formatMonthDay(deliverable.importedAt)} 추가`,
               ].filter(Boolean);
               return (
-                <li key={deliverable.id} className={styles.item}>
+                <li
+                  key={deliverable.id}
+                  className={`${styles.item} ${selected ? styles.selected : ''}`}
+                  aria-current={selected ? 'true' : undefined}
+                  ref={selected ? revealElement : undefined}
+                >
                   <span className={`${styles.badge} ${styles[deliverable.type]}`} aria-label={deliverableTypeLabel[deliverable.type]}>
                     {deliverableTypeBadge[deliverable.type]}
                   </span>
                   <div className={styles.text}>
                     <p className={styles.title}>
+                      {selected && <span className="visually-hidden">선택한 산출물: </span>}
                       {deliverable.sourceUrl ? (
                         <a href={deliverable.sourceUrl} target="_blank" rel="noopener noreferrer">
                           {deliverable.title}

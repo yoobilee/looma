@@ -11,6 +11,8 @@ import { createMemoryStateStore } from '@/data/local/stateStore';
 import { createSeed, PROJECT_A, PROJECT_B } from '@/data/mock/seed';
 import type { Repositories } from '@/data/repositories/types';
 import type { Activity } from '@/domain/types';
+import { DeliverablesTab } from '../deliverables/DeliverablesTab';
+import { ImportHistoryTab } from '../import-history/ImportHistoryTab';
 import { TestDesignTab } from '../test-design/TestDesignTab';
 import { ProjectRecordsTab } from './ProjectRecordsTab';
 
@@ -51,7 +53,12 @@ async function mount(activities: Activity[], search = '', change: (data: AppData
   holder.repos = repos;
   const project = (await repos.projects.get(PROJECT_A))!;
   history.replaceState(null, '', `${location.pathname}${search}`);
-  router = createBrowserRouter([{ element: <Outlet context={{ project, openDeliverableCreate: () => {} }} />, children: [{ path: `/projects/${PROJECT_A}/test-design`, element: <TestDesignTab /> }, { path: '*', element: <ProjectRecordsTab /> }] }]);
+  router = createBrowserRouter([{ element: <Outlet context={{ project, openDeliverableCreate: () => {} }} />, children: [
+        { path: `/projects/${PROJECT_A}`, element: <DeliverablesTab /> },
+        { path: `/projects/${PROJECT_A}/import-history`, element: <ImportHistoryTab /> },
+        { path: `/projects/${PROJECT_A}/test-design`, element: <TestDesignTab /> },
+        { path: '*', element: <ProjectRecordsTab /> },
+      ] }]);
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -141,7 +148,7 @@ describe('프로젝트 기록 탭', () => {
     await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_A}/issues?issue=issue-bug-014`);
   });
 
-  // 원본 ID가 남은 기록. 개별 주소가 없는 화면(가져오기 이력 · 산출물 · 변경 분석)은 탭까지만 간다.
+  // 원본 ID가 남은 기록. 변경 분석만 항목을 여는 주소가 없어 탭까지만 간다.
   const linked = [
     activity('결과-링크', '2026-10-02T09:00:00.000Z', { type: 'results_uploaded', metadata: { detail: 'PASS 3', resultImportId: 'imp-a-2' } }),
     activity('TC-링크', '2026-10-02T10:00:00.000Z', { type: 'test_case_changed', metadata: { detail: '검토 완료', testCaseId: 'tc-002' } }),
@@ -155,8 +162,8 @@ describe('프로젝트 기록 탭', () => {
   it.each([
     ['결과-링크', `/projects/${PROJECT_A}/results?import=imp-a-2`],
     ['TC-링크', `/projects/${PROJECT_A}/test-design?tc=tc-002`],
-    ['TC자산-링크', `/projects/${PROJECT_A}/import-history`],
-    ['산출물-링크', `/projects/${PROJECT_A}`],
+    ['TC자산-링크', `/projects/${PROJECT_A}/import-history?assetImport=tai-1`],
+    ['산출물-링크', `/projects/${PROJECT_A}?deliverable=dlv-1`],
     ['이슈-링크', `/projects/${PROJECT_A}/issues?issue=issue-bug-014`],
   ])('%s를 누르면 %s로 이동한다', async (title, path) => {
     await mount([...base, ...linked]);
@@ -223,6 +230,25 @@ describe('프로젝트 기록 탭', () => {
     await act(async () => router!.navigate(`/projects/${PROJECT_A}/records?type=deliverables`));
     await expect.poll(() => titles(view)).toEqual([applyTitle, reviewTitle]);
     expect(page.getByRole('link', { name: '테스트 설계 보기' }).elements()).toHaveLength(2);
+  });
+
+  it('산출물 추가 기록의 제목을 누르면 산출물 탭에서 그 산출물이 선택된다', async () => {
+    const view = await mount([activity('v1.5 산출물 추가', '2026-10-02T09:00:00.000Z', { metadata: { detail: 'PDF', deliverableId: 'dlv-plan-pdf-v15' } })]);
+    await userEvent.click(page.getByRole('link', { name: 'v1.5 산출물 추가' }));
+    await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_A}?deliverable=dlv-plan-pdf-v15`);
+    await expect.poll(() => view.querySelector('[aria-current="true"]')?.textContent).toContain('모바일_개편_기획_v1.5.pdf');
+    expect(view.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
+  });
+
+  it('TC 가져오기 기록의 제목을 누르면 가져오기 이력에서 그 가져오기가 선택된다', async () => {
+    const view = await mount([activity('TC 자산 11건 가져오기', '2026-10-02T09:00:00.000Z', { type: 'test_assets_imported', metadata: { detail: 'b.csv', testAssetImportId: 'tai-2' } })], '', (data) => {
+      const session = { projectId: PROJECT_A, importedAt: '2026-10-02T09:00:00.000Z', totalRows: 12, created: 11, updated: 1, unchanged: 0, excluded: 0 };
+      data.testAssetImports.push({ ...session, id: 'tai-1', fileName: 'a.csv' }, { ...session, id: 'tai-2', fileName: 'b.csv' });
+    });
+    await userEvent.click(page.getByRole('link', { name: 'TC 자산 11건 가져오기' }));
+    await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_A}/import-history?assetImport=tai-2`);
+    await expect.poll(() => view.querySelector('[aria-current="true"] [class*="fileName"]')?.textContent).toBe('b.csv');
+    expect(view.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
   });
 
   it('390px에서 가로로 넘치지 않는다(긴 링크 제목 포함)', async () => {

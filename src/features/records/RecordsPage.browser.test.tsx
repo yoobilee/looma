@@ -208,6 +208,13 @@ describe('전역 기록: 원본 링크', () => {
     await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_B}/test-design?tc=tc-b`);
   });
 
+  it('산출물 추가 · TC 가져오기 기록도 정확한 항목으로 연결한다(프로젝트 기록 · 검색과 같은 경로)', async () => {
+    const view = await mount();
+    await userEvent.click(page.getByRole('button', { name: /9월 30일/ }));
+    await expect.poll(() => titles(view)).toContain('산출물-A');
+    expect(links(view)).toContain(`산출물-A→/projects/${PROJECT_A}?deliverable=dlv-1`);
+  });
+
   it('원본 ID가 없는 옛 기록 · 종류에 맞지 않는 key · 프로젝트 없는 활동은 오류 없이 평문이고, 프로젝트명은 그대로 보인다', async () => {
     const view = await mount();
     for (const title of ['결과-옛기록', 'TC-엉뚱한key', '개인-이슈형']) {

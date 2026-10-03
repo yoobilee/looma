@@ -33,15 +33,15 @@ describe('활동 원본 링크', () => {
   const linkOf = (type: ActivityType, metadata: Record<string, string>, projectId: string | null = 'proj-1') =>
     activityLinkPath(make('a', at, { type, metadata: { detail: '요약', ...metadata }, ...(projectId && { projectId }) }), 'proj-1');
 
-  // 종류 · metadata key · 경로. 개별 주소가 없는 화면은 ID가 있어도 탭까지만 간다.
+  // 종류 · metadata key · 경로. 변경 분석만 항목을 여는 주소가 없어 ID가 있어도 탭까지만 간다.
   it.each([
     ['issue_created', 'issueId', '/projects/proj-1/issues?issue=id%201'],
     ['issue_updated', 'issueId', '/projects/proj-1/issues?issue=id%201'],
     ['issue_resolved', 'issueId', '/projects/proj-1/issues?issue=id%201'],
     ['results_uploaded', 'resultImportId', '/projects/proj-1/results?import=id%201'],
     ['test_case_changed', 'testCaseId', '/projects/proj-1/test-design?tc=id%201'],
-    ['test_assets_imported', 'testAssetImportId', '/projects/proj-1/import-history'],
-    ['deliverable_added', 'deliverableId', '/projects/proj-1'],
+    ['test_assets_imported', 'testAssetImportId', '/projects/proj-1/import-history?assetImport=id%201'],
+    ['deliverable_added', 'deliverableId', '/projects/proj-1?deliverable=id%201'],
     ['changes_applied', 'analysisId', '/projects/proj-1/test-design'],
     ['requirements_analyzed', 'analysisId', '/projects/proj-1/test-design'],
   ] as [ActivityType, string, string][])('%s + %s → %s, ID가 없는 이전 기록은 링크가 없다', (type, key, path) => {
@@ -55,6 +55,19 @@ describe('활동 원본 링크', () => {
     expect(labelOf('changes_applied')).toBe('테스트 설계 보기');
     expect(labelOf('requirements_analyzed')).toBe('테스트 설계 보기');
     for (const type of ['issue_created', 'results_uploaded', 'test_case_changed', 'test_assets_imported', 'deliverable_added'] as const) expect(labelOf(type)).toBeUndefined();
+  });
+
+  it('산출물 · TC 가져오기 링크는 ID를 인코딩하고, 수행 결과 차수의 `import`와 다른 이름을 쓴다', () => {
+    expect(linkOf('deliverable_added', { deliverableId: 'a&b=c/d?e' })).toBe('/projects/proj-1?deliverable=a%26b%3Dc%2Fd%3Fe');
+    expect(linkOf('test_assets_imported', { testAssetImportId: 'a&b=c/d?e' })).toBe('/projects/proj-1/import-history?assetImport=a%26b%3Dc%2Fd%3Fe');
+    expect(linkOf('results_uploaded', { resultImportId: 'imp-1' })).toBe('/projects/proj-1/results?import=imp-1');
+  });
+
+  it('산출물 · TC 가져오기도 종류에 맞지 않는 key나 다른 프로젝트 활동은 링크가 없다', () => {
+    expect(linkOf('deliverable_added', { testAssetImportId: 'x', analysisId: 'y', issueId: 'z' })).toBeUndefined();
+    expect(linkOf('test_assets_imported', { deliverableId: 'x', resultImportId: 'y' })).toBeUndefined();
+    expect(linkOf('deliverable_added', { deliverableId: 'x' }, 'proj-2')).toBeUndefined();
+    expect(linkOf('test_assets_imported', { testAssetImportId: 'x' }, 'proj-2')).toBeUndefined();
   });
 
   it('종류에 맞지 않는 metadata key만 있으면 링크가 없다', () => {
