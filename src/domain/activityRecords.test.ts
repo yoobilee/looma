@@ -45,6 +45,7 @@ describe('활동 원본 링크', () => {
     ['changes_applied', 'analysisId', '/projects/proj-1/test-design'],
     ['requirements_analyzed', 'analysisId', '/projects/proj-1/test-design'],
     ['requirements_imported', 'deliverableId', '/projects/proj-1/requirements'],
+    ['test_drafts_generated', 'generatedTestCaseIds', '/projects/proj-1/test-design'],
   ] as [ActivityType, string, string][])('%s + %s → %s, ID가 없는 이전 기록은 링크가 없다', (type, key, path) => {
     expect(linkOf(type, { [key]: 'id 1' })).toBe(path);
     expect(linkOf(type, {})).toBeUndefined();
@@ -56,6 +57,7 @@ describe('활동 원본 링크', () => {
     expect(labelOf('changes_applied')).toBe('테스트 설계 보기');
     expect(labelOf('requirements_analyzed')).toBe('테스트 설계 보기');
     for (const type of ['issue_created', 'results_uploaded', 'test_case_changed', 'test_assets_imported', 'deliverable_added', 'requirements_imported'] as const) expect(labelOf(type)).toBeUndefined();
+    expect(labelOf('test_drafts_generated')).toBe('테스트 설계 보기');
   });
 
   it('산출물 · TC 가져오기 링크는 ID를 인코딩하고, 수행 결과 차수의 `import`와 다른 이름을 쓴다', () => {
@@ -77,6 +79,7 @@ describe('활동 원본 링크', () => {
     expect(linkOf('test_case_changed', { analysisId: 'x' })).toBeUndefined();
     expect(linkOf('requirements_analyzed', { deliverableId: 'x', testCaseId: 'y' })).toBeUndefined();
     expect(linkOf('requirements_imported', { analysisId: 'x', testAssetImportId: 'y' })).toBeUndefined();
+    expect(linkOf('test_drafts_generated', { testCaseId: 'x', analysisId: 'y' })).toBeUndefined();
   });
 
   it('링크를 정하지 않은 종류는 metadata가 있어도 링크가 없다', () => {

@@ -10,6 +10,7 @@ import {
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
 import { analyzeRequirementImport, planRequirementImport, requirementImportInputProblems, requirementImportSummaryText, RequirementImportError } from '@/domain/requirementImport';
+import { analyzeTestDraftGeneration, planTestDraftGeneration, testDraftSummaryText } from '@/domain/testDraftGeneration';
 import { importSourceMimeType, toImportSourceSnapshot } from '@/domain/importSource';
 import { applyIssueChanges, buildIssue } from '@/domain/issues';
 import { analyzeTestAssetImport, planTestAssetImport, type ImportTable } from '@/domain/testAssetImport';
@@ -578,6 +579,30 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
     testCases: {
       async listByProject(projectId) {
         return copy(db.testCases.filter((item) => item.projectId === projectId));
+      },
+      createDraftsFromRequirements: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
+          const project = draft.projects.find((item) => item.id === input.projectId);
+          if (!project) throw notFound('프로젝트', input.projectId);
+          // 미리보기와 같은 규칙으로 현재 요구사항 · 테스트 조건 · TC 기준 후보와 판정을 다시 계산한다. 먼저 전부 계산하고 검증하며, 여기서 실패하면 아무것도 저장하지 않는다.
+          const context = {
+            project,
+            requirements: draft.requirements.filter((item) => item.projectId === project.id),
+            deliverables: draft.deliverables.filter((item) => item.projectId === project.id),
+            testConditions: draft.testConditions.filter((item) => item.projectId === project.id),
+            testCases: draft.testCases.filter((item) => item.projectId === project.id),
+          };
+          const analysis = analyzeTestDraftGeneration(context, { requirementIds: input.requirementIds, perspectives: input.perspectives });
+          const plan = planTestDraftGeneration(context, analysis, input.excludedKeys, { createId, now: nowIso() });
+          draft.testConditions.push(...plan.testConditions);
+          draft.testCases.push(...plan.testCases);
+          record(draft, 'test_drafts_generated', `TC 초안 ${plan.testCases.length}건 생성`, {
+            projectId: project.id,
+            metadata: { detail: testDraftSummaryText(plan), generatedTestCaseIds: plan.testCases.map((item) => item.id).join(',') },
+          });
+          return { testCases: plan.testCases, testConditions: plan.testConditions, summary: plan.summary };
+        });
       },
       updateStatus: (id, status) =>
         mutate((draft) => {

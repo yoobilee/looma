@@ -260,6 +260,7 @@ export const activityTypeLabel: Record<ActivityType, string> = {
   deliverable_added: '산출물 추가',
   requirements_analyzed: '요구사항 분석',
   requirements_imported: '요구사항 가져오기',
+  test_drafts_generated: 'TC 초안 생성',
   test_case_changed: 'TC 변경',
   results_uploaded: '수행 결과 업로드',
   issue_created: '이슈 등록',
@@ -277,6 +278,12 @@ export const requirementImportFieldLabel: Record<RequirementImportField, string>
   text: '요구사항',
   locator: '출처 위치',
   needsConfirmation: '확인 필요',
+};
+
+export const testDraftKindLabel: Record<'create' | 'duplicate' | 'invalid', string> = {
+  create: '신규',
+  duplicate: '중복',
+  invalid: '오류',
 };
 
 export const requirementImportKindLabel: Record<RequirementImportKind, string> = {

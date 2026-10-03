@@ -26,6 +26,7 @@ const summaryPhrases: Partial<Record<ActivityType, (count: number) => string>> =
   deliverable_added: (count) => `산출물 ${count}건을 추가했어요`,
   requirements_analyzed: (count) => `요구사항 분석 ${count}건을 진행했어요`,
   requirements_imported: (count) => `요구사항 파일 ${count}건을 가져왔어요`,
+  test_drafts_generated: (count) => `TC 초안 생성 ${count}건을 진행했어요`,
   test_case_changed: (count) => `TC 변경 ${count}건이 있었어요`,
   results_uploaded: (count) => `수행 결과 ${count}건을 업로드했어요`,
   issue_created: (count) => `이슈·확인사항 ${count}건을 등록했어요`,
