@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { groupActivitiesByDay } from '@/features/records/groupActivities';
-import { activityCategory, activityCategoryFilters, activityLinkPath, matchesActivityCategory, parseActivityCategoryFilter } from './activityRecords';
+import { activityCategory, activityCategoryFilters, activityLinkLabel, activityLinkPath, matchesActivityCategory, parseActivityCategoryFilter } from './activityRecords';
 import { activityTypeLabel } from './labels';
 import type { Activity, ActivityType } from './types';
 
@@ -47,6 +47,12 @@ describe('활동 원본 링크', () => {
     expect(linkOf(type, { [key]: 'id 1' })).toBe(path);
     expect(linkOf(type, {})).toBeUndefined();
     expect(linkOf(type, { [key]: '' })).toBeUndefined();
+  });
+
+  it('개별 원본이 아닌 화면으로만 가는 변경사항 반영만 별도 링크 문구를 쓰고, 나머지는 제목 링크다', () => {
+    const labelOf = (type: ActivityType) => activityLinkLabel(make('a', at, { type }));
+    expect(labelOf('changes_applied')).toBe('테스트 설계 보기');
+    for (const type of ['issue_created', 'results_uploaded', 'test_case_changed', 'test_assets_imported', 'deliverable_added'] as const) expect(labelOf(type)).toBeUndefined();
   });
 
   it('종류에 맞지 않는 metadata key만 있으면 링크가 없다', () => {

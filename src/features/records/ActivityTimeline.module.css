@@ -83,3 +83,15 @@
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+.action {
+  justify-self: start;
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-sky);
+  text-decoration: none;
+}
+
+.action:hover {
+  text-decoration: underline;
+}

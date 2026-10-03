@@ -64,6 +64,16 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
 };
 
 /**
+ * 제목 대신 별도 버튼 문구로 보여줄 링크. 개별 원본을 여는 주소가 없어 현재 화면으로만 가는 경우다.
+ * 변경 분석은 테스트 설계 탭이 최신 분석만 보여 주므로, 과거 기록의 제목이 그 분석을 여는 링크처럼 보이지 않게 한다.
+ */
+const tabLinkLabels: Partial<Record<ActivityType, string>> = {
+  changes_applied: '테스트 설계 보기',
+};
+
+export const activityLinkLabel = (activity: Activity): string | undefined => tabLinkLabels[activity.type];
+
+/**
  * 원본으로 가는 프로젝트 안 경로. 연결할 ID가 기록에 없거나(이전 기록), 다른 프로젝트의 활동이면 추측하지 않고 undefined.
  * 종류에 맞지 않는 metadata key는 보지 않는다.
  */
