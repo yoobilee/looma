@@ -9,7 +9,7 @@ import {
   requirementChangeNeedsDecision,
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
-import { analyzeRequirementImport, planRequirementImport, requirementColumnMappingProblems, requirementImportSummaryText, RequirementImportError } from '@/domain/requirementImport';
+import { analyzeRequirementImport, planRequirementImport, requirementImportInputProblems, requirementImportSummaryText, RequirementImportError } from '@/domain/requirementImport';
 import { importSourceMimeType, toImportSourceSnapshot } from '@/domain/importSource';
 import { applyIssueChanges, buildIssue } from '@/domain/issues';
 import { analyzeTestAssetImport, planTestAssetImport, type ImportTable } from '@/domain/testAssetImport';
@@ -456,7 +456,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           const { projectId } = input;
           if (!draft.projects.some((item) => item.id === projectId)) throw notFound('프로젝트', projectId);
           if (!draft.deliverables.some((item) => item.id === input.deliverableId && item.projectId === projectId)) throw notFound('산출물', input.deliverableId);
-          const [problem] = requirementColumnMappingProblems(input.table.headers, input.mapping);
+          const [problem] = requirementImportInputProblems(input.table, input.mapping);
           if (problem) throw new RequirementImportError(problem);
           // 미리보기와 같은 규칙으로 현재 요구사항 기준 판정을 다시 계산한다. 먼저 전부 계산하고 검증하며, 여기서 실패하면 아무것도 저장하지 않는다.
           const analysis = analyzeRequirementImport(

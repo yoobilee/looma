@@ -65,7 +65,9 @@ export function RequirementImportDialog({ open, onClose, projectId, deliverables
   const [result, setResult] = useState<RequirementImportSummary>();
 
   const analysis = useMemo(() => (table && step === 'preview' ? analyzeRequirementImport(table, mapping, requirements) : undefined), [table, mapping, requirements, step]);
-  const summary = analysis ? summarizeRequirementImport(analysis, excludedRows) : undefined;
+  // 미리보기를 보는 동안 요구사항이 바뀌어 더는 신규가 아닌 행의 제외는 넘기지 않는다(저장소는 그런 제외를 거부한다).
+  const effectiveExcluded = analysis ? excludedRows.filter((rowNumber) => analysis.rows.some((row) => row.kind === 'create' && row.candidate.rowNumber === rowNumber)) : excludedRows;
+  const summary = analysis ? summarizeRequirementImport(analysis, effectiveExcluded) : undefined;
   const mappingProblems = table ? requirementColumnMappingProblems(table.headers, mapping) : [];
 
   const toggleExcluded = (rowNumber: number, excluded: boolean) =>
@@ -76,7 +78,7 @@ export function RequirementImportDialog({ open, onClose, projectId, deliverables
     setBusy(true);
     setApplyError('');
     try {
-      const imported = await repositories.requirements.importFromTable({ projectId, deliverableId, fileName, table, mapping, excludedRows });
+      const imported = await repositories.requirements.importFromTable({ projectId, deliverableId, fileName, table, mapping, excludedRows: effectiveExcluded });
       setResult(imported.summary);
       setStep('done');
     } catch (error) {
@@ -277,7 +279,7 @@ export function RequirementImportDialog({ open, onClose, projectId, deliverables
                 </thead>
                 <tbody>
                   {analysis.rows.map((item) => (
-                    <PreviewRow key={item.candidate.rowNumber} item={item} excluded={excludedRows.includes(item.candidate.rowNumber)} onExclude={(excluded) => toggleExcluded(item.candidate.rowNumber, excluded)} />
+                    <PreviewRow key={item.candidate.rowNumber} item={item} excluded={effectiveExcluded.includes(item.candidate.rowNumber)} onExclude={(excluded) => toggleExcluded(item.candidate.rowNumber, excluded)} />
                   ))}
                 </tbody>
               </table>

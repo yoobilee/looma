@@ -233,6 +233,55 @@ describe('요구사항 가져오기: CSV 전체 흐름', () => {
   });
 });
 
+describe('요구사항 가져오기: 원본 행 번호 · 미리보기 중 변경', () => {
+  it('따옴표 안 줄바꿈이 있는 CSV는 미리보기 · 저장 모두 원본 줄 번호를 쓴다', async () => {
+    const { repos } = await mount();
+    await userEvent.click(button('요구사항 가져오기'));
+    // 1 헤더 / 2~3 로그인 / 4 결제
+    await chooseFileAndDeliverable(csvFile('기능,요구사항\n로그인,"이메일로\n로그인한다."\n결제,카드로 결제한다.\n', '줄바꿈.csv'));
+    await enabled('다음: 열 매핑');
+    await userEvent.click(button('다음: 열 매핑'));
+    await enabled('다음: 미리보기');
+    await userEvent.click(button('다음: 미리보기'));
+    await expect.poll(() => tableRows().length).toBe(2);
+    expect(tableRows().map((row) => cells(row)[0])).toEqual(['2', '4']);
+    expect(cells(tableRows()[1])[3]).toBe('요구사항 파일 4행');
+    await userEvent.click(button('가져오기'));
+    await expect.poll(() => dialog()?.textContent).toContain('요구사항 2건을 가져왔어요.');
+    expect((await repos.requirements.listByProject(PROJECT_A)).map((item) => item.sourceRefs[0].locator)).toEqual(['요구사항 파일 2행', '요구사항 파일 4행']);
+  });
+
+  it('미리보기에서 제외한 행이 그 사이 다른 경로로 생긴 요구사항과 같아져도 오류 없이 나머지를 가져온다', async () => {
+    const { repos } = await mount();
+    await userEvent.click(button('요구사항 가져오기'));
+    await chooseFileAndDeliverable(csvFile('기능,요구사항\n로그인,로그인한다.\n로그인,로그아웃한다.\n결제,결제한다.\n', '변경.csv'));
+    await enabled('다음: 열 매핑');
+    await userEvent.click(button('다음: 열 매핑'));
+    await enabled('다음: 미리보기');
+    await userEvent.click(button('다음: 미리보기'));
+    await expect.poll(() => tableRows().length).toBe(3);
+    await userEvent.click(page.getByRole('checkbox', { name: '2행 제외' }));
+    await expect.poll(() => count('제외')).toBe('1');
+
+    // 미리보기를 보는 동안 제외한 행(로그인한다.)과 같은 요구사항이 다른 경로로 생긴다.
+    await repos.requirements.importFromTable({
+      projectId: PROJECT_A,
+      deliverableId: DELIVERABLE,
+      fileName: '다른 경로.csv',
+      table: { headers: ['기능', '요구사항'], rows: [{ rowNumber: 2, cells: ['로그인', '로그인한다.'] }] },
+      mapping: ['feature', 'text'],
+      excludedRows: [],
+    });
+    // 화면이 다시 판정해 2행은 중복이 되고, 사라진 제외는 넘기지 않는다.
+    await expect.poll(() => tableRows()[0].textContent).toContain('이미 있는 요구사항이에요.');
+    expect(['신규', '중복', '제외'].map(count)).toEqual(['2', '1', '0']);
+    await userEvent.click(button('가져오기'));
+    await expect.poll(() => dialog()?.textContent).toContain('요구사항 2건을 가져왔어요.');
+    expect(dialog()!.textContent).not.toContain('제외할 수 있는 요구사항 행이 아니에요');
+    expect((await repos.requirements.listByProject(PROJECT_A)).map((item) => item.text)).toEqual(['로그인한다.', '로그아웃한다.', '결제한다.']);
+  });
+});
+
 describe('요구사항 가져오기: XLSX', () => {
   it('시트가 여러 개인 파일은 시트를 골라야 다음으로 가고, 고른 시트의 표로 가져온다', async () => {
     const { view, repos } = await mount();

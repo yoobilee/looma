@@ -8,6 +8,7 @@ import {
   parseNeedsConfirmation,
   planRequirementImport,
   requirementColumnMappingProblems,
+  requirementImportInputProblems,
   requirementLocatorFallback,
   summarizeRequirementImport,
   suggestRequirementColumnMapping,
@@ -259,5 +260,104 @@ describe('후보 행 판정(다른 출처의 후보도 같은 규칙)', () => {
     const plan = planRequirementImport({ rows, blankRows: 0 }, [], options);
     expect(plan.requirements).toHaveLength(1);
     expect(plan.requirements[0]).toMatchObject({ needsConfirmation: true, sourceRefs: [{ locator: 'AI 초안' }] });
+  });
+});
+
+describe('열 매핑 · 표 모양의 실행 중 검증(타입만 믿지 않는다)', () => {
+  const mismatch = '요구사항 열 매핑 정보가 파일 열과 맞지 않아요.';
+
+  it('매핑 길이가 파일 열 수와 다르면 짧아도 길어도 거부한다', () => {
+    expect(requirementColumnMappingProblems(['요구사항', '위치'], [null, 'text', 'feature'])).toEqual([mismatch]);
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], ['feature'])).toEqual([mismatch]);
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], ['feature', 'text', null])).toEqual([mismatch]);
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], [])).toEqual([mismatch]);
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], undefined as unknown as RequirementColumnMapping)).toEqual([mismatch]);
+  });
+
+  it('알려진 필드 또는 null이 아닌 값은 거부한다', () => {
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], ['feature', 'hacked' as never])).toEqual(['알 수 없는 연결 필드예요. (hacked)']);
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], ['feature', undefined as never])).toEqual(['알 수 없는 연결 필드예요. (undefined)']);
+    expect(requirementColumnMappingProblems(['기능', '요구사항'], ['feature', 'text'])).toEqual([]);
+  });
+
+  it('기능 · 요구사항은 정확히 하나, 출처 위치 · 확인 필요는 최대 하나다', () => {
+    expect(requirementColumnMappingProblems(['a', 'b', 'c'], ['feature', 'text', 'text'])).toEqual(["'요구사항'에 열이 둘 이상 연결됐어요. (b, c)"]);
+    expect(requirementColumnMappingProblems(['a', 'b', 'c'], ['feature', 'text', 'locator'])).toEqual([]);
+    expect(requirementColumnMappingProblems(['a', 'b', 'c', 'd'], ['feature', 'text', 'locator', 'locator'])).toEqual(["'출처 위치'에 열이 둘 이상 연결됐어요. (c, d)"]);
+    expect(requirementColumnMappingProblems(['a', 'b', 'c', 'd'], ['feature', 'text', 'needsConfirmation', 'needsConfirmation'])).toEqual([
+      "'확인 필요'에 열이 둘 이상 연결됐어요. (c, d)",
+    ]);
+  });
+
+  it('입력 문제: 행의 칸 수가 헤더와 다르면(숨은 칸 · 모자란 칸) 자르거나 채우지 않고 거부한다', () => {
+    const wide: ImportTable = { headers: ['기능', '요구사항'], rows: [{ rowNumber: 2, cells: ['a', 'b', '숨은 칸'] }] };
+    expect(requirementImportInputProblems(wide, ['feature', 'text'])).toEqual(['2행의 칸 수가 파일 열 수와 맞지 않아요.']);
+    // 긴 매핑으로 숨은 칸을 읽으려는 조합도 매핑 길이에서 막힌다.
+    expect(requirementImportInputProblems(wide, ['feature', 'text', 'locator'])).toEqual(['2행의 칸 수가 파일 열 수와 맞지 않아요.']);
+    const narrow: ImportTable = { headers: ['기능', '요구사항'], rows: [{ rowNumber: 2, cells: ['a'] }] };
+    expect(requirementImportInputProblems(narrow, ['feature', 'text'])).toEqual(['2행의 칸 수가 파일 열 수와 맞지 않아요.']);
+    expect(requirementImportInputProblems({ headers: ['기능', '요구사항'], rows: [{ rowNumber: 2, cells: ['a', 'b'] }] }, ['feature', 'text', 'locator'])).toEqual([mismatch]);
+  });
+
+  it('입력 문제: 행 번호는 겹치지 않는 양의 정수여야 하고, 올바른 입력은 문제가 없다', () => {
+    const rows = (...numbers: number[]) => numbers.map((rowNumber) => ({ rowNumber, cells: ['a', 'b'] }));
+    expect(requirementImportInputProblems({ headers: ['기능', '요구사항'], rows: rows(2, 2) }, ['feature', 'text'])).toEqual(['행 번호가 올바르지 않아요. (2)']);
+    expect(requirementImportInputProblems({ headers: ['기능', '요구사항'], rows: rows(0) }, ['feature', 'text'])).toEqual(['행 번호가 올바르지 않아요. (0)']);
+    expect(requirementImportInputProblems({ headers: ['기능', '요구사항'], rows: rows(1.5) }, ['feature', 'text'])).toEqual(['행 번호가 올바르지 않아요. (1.5)']);
+    expect(requirementImportInputProblems({ headers: ['기능', '요구사항'], rows: rows(2, 4) }, ['feature', 'text'])).toEqual([]);
+    expect(requirementImportInputProblems(table([HEADER, ['a', 'b', 'p.1', 'N']]), MAPPING)).toEqual([]);
+  });
+});
+
+describe('제외 목록 검증', () => {
+  // 2 신규 / 3 신규 / 4 오류(요구사항 없음) / 5 기존과 중복 / 6 파일 안 중복
+  const analysis = analyzeRequirementImport(
+    table([
+      HEADER,
+      ['로그인', '로그인한다.', '', 'N'],
+      ['로그인', '로그아웃한다.', '', 'N'],
+      ['로그인', '', '', 'N'],
+      ['회원가입', '이메일로 가입할 수 있다.', '', 'N'],
+      ['로그인', '로그인한다.', '', 'N'],
+      ['', '', '', ''],
+    ]),
+    MAPPING,
+    [existing()],
+  );
+  const plan = (excluded: number[]) => planRequirementImport(analysis, excluded, options);
+
+  it('지금 새 요구사항이 될 행의 제외만 받아들이고 그 행은 만들지 않는다', () => {
+    expect(plan([2]).requirements.map((item) => item.text)).toEqual(['로그아웃한다.']);
+    expect(plan([3]).summary).toEqual({ total: 5, created: 1, duplicate: 2, invalid: 1, excluded: 1 });
+    expect(plan([]).requirements).toHaveLength(2);
+  });
+
+  it('없는 행 번호는 조용히 무시하지 않고 거부한다', () => {
+    expect(() => plan([999])).toThrow(RequirementImportError);
+    expect(() => plan([999])).toThrow('999행은 제외할 수 있는 요구사항 행이 아니에요.');
+    expect(() => plan([2, 0])).toThrow('0행은 제외할 수 있는 요구사항 행이 아니에요.');
+    expect(() => plan([-1])).toThrow('-1행은 제외할 수 있는 요구사항 행이 아니에요.');
+  });
+
+  it('오류 · 중복 · 빈 행의 제외는 거부한다', () => {
+    expect(() => plan([4])).toThrow('4행은 제외할 수 있는 요구사항 행이 아니에요.');
+    expect(() => plan([5])).toThrow('5행은 제외할 수 있는 요구사항 행이 아니에요.');
+    expect(() => plan([6])).toThrow('6행은 제외할 수 있는 요구사항 행이 아니에요.');
+    // 빈 행(7행)은 판정 대상이 아니라 없는 행과 같다.
+    expect(() => plan([7])).toThrow('7행은 제외할 수 있는 요구사항 행이 아니에요.');
+  });
+
+  it('같은 행 번호를 두 번 넣으면 거부한다', () => {
+    expect(() => plan([2, 2])).toThrow('2행을 제외 목록에 두 번 넣었어요.');
+  });
+
+  it('미리보기 뒤에 신규였던 행이 기존 요구사항과 같아졌다면 그 제외도 거부한다(오래된 판단)', () => {
+    const preview = analyzeRequirementImport(table([HEADER, ['로그인', '로그인한다.', '', 'N'], ['로그인', '로그아웃한다.', '', 'N']]), MAPPING, []);
+    expect(() => planRequirementImport(preview, [2], options)).not.toThrow();
+    // 그 사이 같은 요구사항이 생겼다.
+    const later = analyzeRequirementImport(table([HEADER, ['로그인', '로그인한다.', '', 'N'], ['로그인', '로그아웃한다.', '', 'N']]), MAPPING, [existing({ feature: '로그인', text: '로그인한다.' })]);
+    expect(() => planRequirementImport(later, [2], options)).toThrow('2행은 제외할 수 있는 요구사항 행이 아니에요.');
+    // 제외하지 않은 채라면 중복이 된 행은 만들지 않고 나머지만 만든다.
+    expect(planRequirementImport(later, [], options).requirements.map((item) => item.text)).toEqual(['로그아웃한다.']);
   });
 });

@@ -67,7 +67,13 @@ describe('CSV 가져오기 (기존 동작)', () => {
     const source = await open(csvFile(text));
     expect(source.format).toBe('csv');
     expect(source.sheetNames).toEqual([]);
-    expect(await tableOf(csvFile(text))).toEqual(toImportTable(parseCsv(text)));
+    // 칸 내용 · 헤더 · 행 수는 기존 parseCsv · toImportTable과 같고, 행 번호만 원본 줄 번호다(따옴표 안 줄바꿈 뒤 행이 밀리지 않는다).
+    const table = await tableOf(csvFile(text));
+    const legacy = toImportTable(parseCsv(text))!;
+    expect(table.headers).toEqual(legacy.headers);
+    expect(table.rows.map((row) => row.cells)).toEqual(legacy.rows.map((row) => row.cells));
+    // 1 헤더 / 2~3 SIGN-001(셀 안 줄바꿈) / 4 빈 줄 / 5 SIGN-002
+    expect(table.rows.map((row) => row.rowNumber)).toEqual([2, 4, 5]);
   });
 
   it('내용이 없거나 헤더만 있는 CSV는 이유를 알려 준다', async () => {

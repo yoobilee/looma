@@ -39,8 +39,15 @@ export function suggestRequirementColumnMapping(headers: string[]): RequirementC
   });
 }
 
-/** 가져오기를 막는 매핑 문제 */
+/**
+ * 가져오기를 막는 매핑 문제. 타입만 믿지 않고 실행 중 모양도 확인한다:
+ * 파일 열 수와 같은 길이, 알려진 필드 또는 null, 기능 · 요구사항은 정확히 하나, 출처 위치 · 확인 필요는 최대 하나.
+ */
 export function requirementColumnMappingProblems(headers: string[], mapping: RequirementColumnMapping): string[] {
+  if (!Array.isArray(mapping) || mapping.length !== headers.length) return ['요구사항 열 매핑 정보가 파일 열과 맞지 않아요.'];
+  // 비어 있는 칸(undefined)도 알려지지 않은 값이다. find는 값이 undefined인 경우를 못 구분하므로 위치로 찾는다.
+  const unknownIndex = Array.from(mapping).findIndex((field) => field !== null && !requirementImportFields.includes(field));
+  if (unknownIndex >= 0) return [`알 수 없는 연결 필드예요. (${String(mapping[unknownIndex])})`];
   const problems: string[] = [];
   for (const field of requirementImportFields) {
     const columns = headers.filter((_, index) => mapping[index] === field);
@@ -50,6 +57,20 @@ export function requirementColumnMappingProblems(headers: string[], mapping: Req
     if (!mapping.includes(field)) problems.push(`'${requirementImportFieldLabel[field]}' 열을 연결해 주세요.`);
   }
   return problems;
+}
+
+/**
+ * 가져오기 입력(표 + 열 매핑)의 문제. 저장소처럼 화면 밖에서 직접 호출되는 곳에서 확인한다.
+ * 표는 모든 행이 헤더와 같은 수의 칸을 가져야 하고(숨은 칸을 읽지 않도록 자르거나 채우지 않는다), 행 번호는 겹치지 않는 양의 정수여야 한다.
+ */
+export function requirementImportInputProblems(table: ImportTable, mapping: RequirementColumnMapping): string[] {
+  const rowNumbers = new Set<number>();
+  for (const row of table.rows) {
+    if (!Array.isArray(row.cells) || row.cells.length !== table.headers.length) return [`${row.rowNumber}행의 칸 수가 파일 열 수와 맞지 않아요.`];
+    if (!Number.isInteger(row.rowNumber) || row.rowNumber < 1 || rowNumbers.has(row.rowNumber)) return [`행 번호가 올바르지 않아요. (${String(row.rowNumber)})`];
+    rowNumbers.add(row.rowNumber);
+  }
+  return requirementColumnMappingProblems(table.headers, mapping);
 }
 
 /* ---------- 후보 행 ---------- */
@@ -206,8 +227,17 @@ export interface RequirementImportPlan {
  * 만들 요구사항을 계산한다(저장하지 않는다). 신규 행 중 사용자가 제외하지 않은 행만 만들고 중복 · 오류 행은 만들지 않는다.
  * 새 요구사항은 산출물에 적힌 내용(source_explicit)이고 검토 전(draft) · 유효(active)다. 확인 필요는 파일 값 그대로다.
  * 근거 위치가 없는 행은 원본 행 번호로 대신한다. 만들 요구사항이 하나도 없으면 던진다.
+ * 제외 목록(excludedRows)은 "지금 새 요구사항이 될 행을 사용자가 뺀 결정"만 담는다. 없는 행 · 중복 · 오류 · 빈 행 · 같은 번호 두 번은 조용히 무시하지 않고 던진다.
+ * 미리보기 뒤에 요구사항이 바뀌어 신규였던 행이 중복이 됐다면 그 제외도 던진다(TC 가져오기가 미리보기 뒤 바뀐 판정을 거부하는 것과 같다). 화면은 미리보기를 다시 계산해 지금도 신규인 행만 넘긴다.
  */
 export function planRequirementImport(analysis: RequirementImportAnalysis, excludedRows: readonly number[], options: RequirementImportPlanOptions): RequirementImportPlan {
+  const creatable = new Set(analysis.rows.filter((row) => row.kind === 'create').map((row) => row.candidate.rowNumber));
+  const seen = new Set<number>();
+  for (const rowNumber of excludedRows) {
+    if (seen.has(rowNumber)) throw new RequirementImportError(`${rowNumber}행을 제외 목록에 두 번 넣었어요.`);
+    seen.add(rowNumber);
+    if (!creatable.has(rowNumber)) throw new RequirementImportError(`${rowNumber}행은 제외할 수 있는 요구사항 행이 아니에요.`);
+  }
   const excluded = new Set(excludedRows);
   const requirements = analysis.rows
     .filter((row) => row.kind === 'create' && !excluded.has(row.candidate.rowNumber))

@@ -24,13 +24,16 @@ export interface ImportTable {
 
 const isBlank = (cells: string[]) => cells.every((cell) => cell.trim() === '');
 
-/** parser가 읽은 행 배열을 표로 바꾼다. 내용이 없으면 undefined. */
-export function toImportTable(records: string[][]): ImportTable | undefined {
+/**
+ * parser가 읽은 행 배열을 표로 바꾼다. 내용이 없으면 undefined.
+ * lines가 있으면 records[i]가 원본에서 시작하는 줄 번호이고(CSV는 따옴표 안 줄바꿈으로 한 레코드가 여러 줄일 수 있다), 없으면 레코드 순서가 곧 행 번호다(XLSX).
+ */
+export function toImportTable(records: string[][], lines?: number[]): ImportTable | undefined {
   const headerIndex = records.findIndex((cells) => !isBlank(cells));
   if (headerIndex < 0) return undefined;
   const headers = records[headerIndex].map((header, index) => header.trim() || `열 ${index + 1}`);
   const rows = records.slice(headerIndex + 1).map((cells, offset) => ({
-    rowNumber: headerIndex + offset + 2,
+    rowNumber: lines ? lines[headerIndex + offset + 1] : headerIndex + offset + 2,
     cells: headers.map((_, index) => cells[index] ?? ''),
   }));
   return { headers, rows };

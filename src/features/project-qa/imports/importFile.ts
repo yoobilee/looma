@@ -1,6 +1,6 @@
 import { importSourceMimeType } from '@/domain/importSource';
 import { toImportTable, type ImportTable } from '@/domain/testAssetImport';
-import { decodeText, parseCsv } from '@/lib/csv';
+import { decodeText, parseCsvRecords, type CsvRecord } from '@/lib/csv';
 import { ImportFileError, openXlsxWorkbook } from './xlsxSheet';
 
 /*
@@ -30,8 +30,8 @@ export type ImportFileResult = { ok: true; source: ImportFileSource } | { ok: fa
 const unsupportedExtensions = ['xls', 'xlsm', 'ods'];
 
 /** 헤더 행과 데이터 행이 있는 표로 만든다. 파일이 비었거나 헤더만 있으면 이유를 돌려준다. */
-function tableResult(records: string[][], emptyMessage: string, notes: string[] = []): ImportTableResult {
-  const table = toImportTable(records);
+function tableResult(records: string[][], emptyMessage: string, notes: string[] = [], lines?: number[]): ImportTableResult {
+  const table = toImportTable(records, lines);
   if (!table) return { ok: false, message: emptyMessage };
   if (table.rows.length === 0) return { ok: false, message: '헤더 아래에 데이터 행이 없어요.' };
   return { ok: true, table, notes };
@@ -52,10 +52,18 @@ export async function readImportFile(file: File): Promise<ImportFileResult> {
     const buffer = await file.arrayBuffer();
 
     if (extension === 'csv') {
-      const records = parseCsv(decodeText(buffer));
+      // 행 번호는 원본 CSV에서 레코드가 시작하는 줄이다(따옴표 안 줄바꿈이 있어도 사람이 파일에서 찾는 줄과 같다).
+      const records: CsvRecord[] = parseCsvRecords(decodeText(buffer));
       return {
         ok: true,
-        source: { format: 'csv', bytes: new Blob([buffer], { type: importSourceMimeType.csv }), sheetNames: [], readTable: () => tableResult(records, '파일에 내용이 없어요.') },
+        source: { format: 'csv', bytes: new Blob([buffer], { type: importSourceMimeType.csv }), sheetNames: [], readTable: () =>
+          tableResult(
+            records.map((record) => record.cells),
+            '파일에 내용이 없어요.',
+            [],
+            records.map((record) => record.line),
+          ),
+        },
       };
     }
 
