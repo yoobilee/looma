@@ -90,12 +90,13 @@ describe('프로젝트 기록 탭', () => {
     const view = await mount(base);
     await userEvent.click(filterButton('이슈·확인사항'));
     await expect.poll(() => location.search).toBe('?type=issues');
-    expect(titles(view)).toEqual(['이슈-옛기록', '이슈-링크']);
+    await expect.poll(() => titles(view)).toEqual(['이슈-옛기록', '이슈-링크']);
+    await expect.poll(() => filterButton('이슈·확인사항').element().getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(filterButton('수행 결과'));
     await expect.poll(() => titles(view)).toEqual(['결과']);
     await act(async () => router!.navigate(-1));
     await expect.poll(() => titles(view)).toEqual(['이슈-옛기록', '이슈-링크']);
-    expect(filterButton('이슈·확인사항').element().getAttribute('aria-pressed')).toBe('true');
+    await expect.poll(() => filterButton('이슈·확인사항').element().getAttribute('aria-pressed')).toBe('true');
     await act(async () => router!.navigate(1));
     await expect.poll(() => titles(view)).toEqual(['결과']);
     await userEvent.click(filterButton('전체'));
@@ -105,7 +106,7 @@ describe('프로젝트 기록 탭', () => {
   it('잘못된 type은 전체로 보여준다', async () => {
     const view = await mount(base, '?type=bogus');
     await expect.poll(() => titles(view)).toHaveLength(5);
-    expect(filterButton('전체').element().getAttribute('aria-pressed')).toBe('true');
+    await expect.poll(() => filterButton('전체').element().getAttribute('aria-pressed')).toBe('true');
   });
 
   it('결과가 0건인 종류는 그 종류의 기록이 없다고 알리고, 기록이 전혀 없으면 기존 빈 상태다', async () => {
