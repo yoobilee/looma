@@ -34,22 +34,26 @@ export function RequirementsTab() {
   const [draftOpen, setDraftOpen] = useState(false);
 
   const data = useRepositoryData(
-    async (repos) => ({
-      requirements: await repos.requirements.listByProject(project.id),
-      deliverables: await repos.deliverables.listByProject(project.id),
-      issues: await repos.issues.listByProject(project.id),
-      testConditions: await repos.testConditions.listByProject(project.id),
-      testCases: await repos.testCases.listByProject(project.id),
-      // 새 TC에 붙일 프로젝트 양식. 실제로 있고 이 프로젝트에서 쓸 수 있는지 미리보기에서 확인한다.
-      templates: project.tcTemplateId ? [await repos.templates.get(project.tcTemplateId)].filter((item): item is NonNullable<typeof item> => !!item) : [],
-    }),
-    [project.id, project.tcTemplateId],
+    async (repos) => {
+      const currentProject = (await repos.projects.get(project.id)) ?? project;
+      return {
+        requirements: await repos.requirements.listByProject(project.id),
+        deliverables: await repos.deliverables.listByProject(project.id),
+        issues: await repos.issues.listByProject(project.id),
+        testConditions: await repos.testConditions.listByProject(project.id),
+        testCases: await repos.testCases.listByProject(project.id),
+        // 지금 저장된 프로젝트와 그 양식. 새 TC에 붙을 양식이 미리보기 뒤에 바뀌면 미리보기가 달라진 것으로 알 수 있게 항상 최신 값을 쓴다.
+        currentProject,
+        templates: currentProject.tcTemplateId ? [await repos.templates.get(currentProject.tcTemplateId)].filter((item): item is NonNullable<typeof item> => !!item) : [],
+      };
+    },
+    [project.id],
   );
 
   if (data.status === 'loading') return <LoadingState />;
   if (data.status === 'error') return <StateMessage tone="error" title="요구사항을 불러오지 못했어요." />;
 
-  const { requirements, deliverables, issues, testConditions, testCases, templates } = data.data;
+  const { requirements, deliverables, issues, testConditions, testCases, templates, currentProject } = data.data;
   // 가져오기 중 목록이 비어 있음 ↔ 있음으로 바뀌어도 대화상자가 다시 만들어지지 않도록 두 화면 모두 같은 자리에 둔다.
   const importDialog = importOpen ? <RequirementImportDialog open projectId={project.id} deliverables={deliverables} requirements={requirements} onClose={() => setImportOpen(false)} /> : null;
   if (requirements.length === 0) {
@@ -243,7 +247,7 @@ export function RequirementsTab() {
     {draftOpen && (
       <TestDraftDialog
         open
-        project={project}
+        project={currentProject}
         requirements={requirements}
         deliverables={deliverables}
         testConditions={testConditions}

@@ -215,7 +215,7 @@ describe('요구사항 기반 TC 초안: 전체 흐름', () => {
     await act(async () => router!.navigate(`/projects/${PROJECT_A}/records`));
     await expect.poll(() => view.textContent).toContain('TC 초안 2건 생성');
     expect(page.getByRole('link', { name: 'TC 초안 2건 생성' }).elements()).toHaveLength(0);
-    expect(view.textContent).toContain('신규 TC 2(별도 신규 0) · 기존 TC 연결 0 · 테스트 조건 신규 2 · 재사용 0 · 중복 제외 0 · 제외 1');
+    expect(view.textContent).toContain('신규 TC 2(별도 신규 0) · 기존 TC 연결 0 · 생성 TC 연결 0 · 테스트 조건 신규 2 · 재사용 0 · 중복 제외 0 · 제외 1');
   });
 
   it('확인 필요 요구사항은 확인 필요 초안으로 미리보기 · 저장되고 테스트 설계에서 검토 완료가 막힌다', async () => {
@@ -362,9 +362,11 @@ describe('요구사항 기반 TC 초안: 중복 판단', () => {
     expect([...decisionSelect().options].map((option) => option.textContent)).toEqual(['판단 필요', '앞선 후보 TC와 연결', '별도 신규 TC로 만들기', '제외']);
 
     await decide('앞선 후보 TC와 연결');
-    await expect.poll(() => counts('생성 후보', '기존 TC 연결', '판단 필요')).toEqual(['1', '1', '0']);
+    // 앞선 후보로 만드는 새 TC에 연결하는 것이라 "기존 TC 연결"이 아니라 "생성 TC 연결"로 센다.
+    await expect.poll(() => counts('생성 후보', '기존 TC 연결', '생성 TC 연결', '판단 필요')).toEqual(['1', '0', '1', '0']);
+    expect(dialog()!.textContent).toContain('만드는 TC에 요구사항 1건을 더 연결해요.');
     await userEvent.click(makeButton());
-    await expect.poll(() => dialog()?.textContent).toContain('TC 초안 1건을 만들고');
+    await expect.poll(() => dialog()?.textContent).toContain('만든 TC에 요구사항 1건을 더 연결했어요.');
     const created = (await repos.testCases.listByProject(PROJECT_A)).filter((item) => item.origin === 'manual');
     expect(created).toHaveLength(1);
     expect(created[0].requirementIds).toEqual(['req-dup-1', 'req-dup-2']);
@@ -415,6 +417,84 @@ describe('요구사항 기반 TC 초안: 미리보기 뒤 바뀐 데이터', () 
   });
 });
 
+describe('요구사항 기반 TC 초안: 미리보기 뒤 저장 결과가 달라지는 변경', () => {
+  const withTemplateB = (data: AppData) => void data.templates.push({ ...data.templates[0], id: 'tpl-b', projectId: PROJECT_A, name: '양식 B' });
+
+  it('양식이 A에서 B로 바뀌면 저장하지 않고 다시 확인하게 하며, 다시 확인한 뒤에는 B 양식으로 만든다', async () => {
+    const { view, repos } = await mount({ change: withTemplateB });
+    const before = await repos.testCases.listByProject(PROJECT_A);
+    await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('생성 후보')).toEqual(['1']);
+
+    await changeStored(repos, (data) => void (data.projects.find((item) => item.id === PROJECT_A)!.tcTemplateId = 'tpl-b'));
+    await expect.poll(() => dialog()!.textContent).toContain(STALE);
+    expect(isDisabled(makeButton())).toBe(true);
+    expect(await repos.testCases.listByProject(PROJECT_A)).toEqual(before);
+
+    await userEvent.click(button('미리보기 다시 확인'));
+    await expect.poll(() => isDisabled(makeButton())).toBe(false);
+    expect(dialog()!.textContent).not.toContain(STALE);
+    await userEvent.click(makeButton());
+    await expect.poll(() => dialog()?.textContent).toContain('TC 초안 1건을 만들고');
+    expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.origin === 'manual')!.templateId).toBe('tpl-b');
+  });
+
+  it('연결하려던 기존 TC의 사전 조건이 바뀌면 연결하지 않고 다시 확인하게 한다', async () => {
+    const { view, repos } = await mount({ change: (data) => addDuplicateOfReq001(data, { precondition: 'session A' }) });
+    await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('판단 필요')).toEqual(['1']);
+    await decide('기존 TC와 연결');
+    await expect.poll(() => counts('기존 TC 연결', '판단 필요')).toEqual(['1', '0']);
+    const before = await repos.testCases.listByProject(PROJECT_A);
+
+    // 제목 · 절차 · 기대 결과 · 상태는 그대로이고 사전 조건과 revision만 바뀐다.
+    await changeStored(repos, (data) => {
+      const target = data.testCases.find((item) => item.id === 'tc-existing-draft')!;
+      target.precondition = 'session B';
+      target.revision += 1;
+    });
+    await expect.poll(() => dialog()!.textContent).toContain(STALE);
+    expect(isDisabled(makeButton())).toBe(true);
+    const stale = await repos.testCases.listByProject(PROJECT_A);
+    expect(stale.find((item) => item.id === 'tc-existing-draft')).toMatchObject({ precondition: 'session B', requirementIds: [] });
+    expect(stale).toHaveLength(before.length);
+
+    // 다시 확인하면 판단이 처음으로 돌아가고, 새로 연결하면 바뀐 TC에 요구사항이 더해진다.
+    await userEvent.click(button('미리보기 다시 확인'));
+    await expect.poll(() => counts('판단 필요')).toEqual(['1']);
+    await decide('기존 TC와 연결');
+    await expect.poll(() => isDisabled(makeButton())).toBe(false);
+    await userEvent.click(makeButton());
+    await expect.poll(() => dialog()?.textContent).toContain('기존 TC 1건에 연결했어요.');
+    expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-existing-draft')).toMatchObject({ precondition: 'session B', requirementIds: ['req-001'], revision: 4 });
+  });
+
+  it('미리보기 뒤 같은 테스트 조건이 생기면 저장하지 않고 다시 확인하게 한다', async () => {
+    const { view, repos } = await mount();
+    await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('생성 후보')).toEqual(['1']);
+    const before = await repos.testCases.listByProject(PROJECT_A);
+    await changeStored(repos, (data) => {
+      const [candidate] = produceRuleBasedTestDrafts(
+        { project: data.projects.find((item) => item.id === PROJECT_A)!, requirements: data.requirements, deliverables: data.deliverables, testConditions: [], testCases: [], templates: data.templates },
+        { requirementIds: ['req-001'], perspectives: ['normal_flow'] as TestPerspective[] },
+      ).candidates;
+      data.testConditions.push({ id: 'cond-appeared', projectId: PROJECT_A, requirementIds: ['req-001'], feature: candidate.condition.feature, title: candidate.condition.title, status: 'active', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' });
+    });
+    await expect.poll(() => dialog()!.textContent).toContain(STALE);
+    expect(isDisabled(makeButton())).toBe(true);
+    expect(await repos.testCases.listByProject(PROJECT_A)).toEqual(before);
+    await userEvent.click(button('미리보기 다시 확인'));
+    await expect.poll(() => isDisabled(makeButton())).toBe(false);
+    await userEvent.click(makeButton());
+    await expect.poll(() => dialog()?.textContent).toContain('TC 초안 1건을 만들고');
+    expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.origin === 'manual')!.testConditionIds).toEqual(['cond-appeared']);
+  });
+});
+
 describe('요구사항 기반 TC 초안: 오탐 방지 · 양식', () => {
   it('일반적인 낱말만 있는 요구사항은 권한 · 경계값 초안을 만들지 않고 만들지 않은 이유를 보여준다', async () => {
     const { view } = await mount({
@@ -432,6 +512,22 @@ describe('요구사항 기반 TC 초안: 오탐 방지 · 양식', () => {
     expect(dialog()!.querySelector('details')!.textContent).toContain('경계값 단서가 없어 만들지 않았어요');
     expect(dialog()!.textContent).toContain('선택한 요구사항과 관점으로 만들 수 있는 후보가 없어요.');
     expect(isDisabled(makeButton())).toBe(true);
+  });
+
+  it('역할 이름만 있는 문장은 권한 초안을 만들지 않고, 접근을 제한하는 문장은 만든다', async () => {
+    const { view } = await mount({
+      change: (data) => {
+        const base = { projectId: PROJECT_A, feature: '관리자', sourceRefs: [{ deliverableId: 'dlv-plan-pdf', locator: 'p.41' }], sourceType: 'source_explicit' as const, needsConfirmation: false, lifecycle: 'active' as const, status: 'draft' as const };
+        data.requirements.push({ ...base, id: 'req-admin-logo', text: '관리자 페이지에 로고를 표시한다.' }, { ...base, id: 'req-admin-only', text: '관리자만 접근할 수 있다.' });
+      },
+    });
+    await choose(view, { 관리자: ['관리자 페이지에 로고를 표시한다.', '관리자만 접근할 수 있다.'] }, ['권한']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('대상 요구사항', '생성 후보')).toEqual(['2', '1']);
+    expect(previewRows()).toHaveLength(1);
+    expect(previewRows()[0].textContent).toContain('관리자만 접근할 수 있다');
+    expect(dialog()!.querySelector('details')!.textContent).toContain('관리자 페이지에 로고를 표시한다.');
+    expect(dialog()!.querySelector('details')!.textContent).toContain('권한 단서가 없어 만들지 않았어요');
   });
 
   it('프로젝트 양식을 쓸 수 없으면 미리보기에서 오류를 알리고 만들 수 없다', async () => {

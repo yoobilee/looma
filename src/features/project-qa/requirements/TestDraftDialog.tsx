@@ -102,15 +102,15 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
     }
   };
 
-  const canApply = !!summary && summary.pending === 0 && summary.created + summary.linked > 0 && !stale && !busy;
+  const canApply = !!summary && summary.pending === 0 && summary.created + summary.linked + summary.linkedToNew > 0 && !stale && !busy;
   const statusNote = preview.problem
     ? preview.problem
     : stale
       ? STALE_TEST_DRAFT_PREVIEW_MESSAGE
       : summary && summary.pending > 0
         ? `판단하지 않은 중복 ${summary.pending}건이 있어요.`
-        : summary && summary.created + summary.linked > 0
-          ? `TC 초안 ${summary.created}건을 만들고 기존 TC ${summary.linked}건에 연결할 예정이에요.`
+        : summary && summary.created + summary.linked + summary.linkedToNew > 0
+          ? `TC 초안 ${summary.created}건을 만들고 기존 TC ${summary.linked}건에 연결할 예정이에요.${summary.linkedToNew > 0 ? ` 만드는 TC에 요구사항 ${summary.linkedToNew}건을 더 연결해요.` : ''}`
           : '새로 반영할 TC 초안 또는 연결이 없어요.';
 
   const footer = result ? (
@@ -154,7 +154,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
         {result && (
           <div className={styles.done} role="status">
             <p className={styles.doneTitle}>
-              TC 초안 {result.created}건을 만들고 기존 TC {result.linked}건에 연결했어요.
+              TC 초안 {result.created}건을 만들고 기존 TC {result.linked}건에 연결했어요.{result.linkedToNew > 0 ? ` 만든 TC에 요구사항 ${result.linkedToNew}건을 더 연결했어요.` : ''}
             </p>
             <p>
               확인 필요 {result.needsConfirmation} · 중복 {result.duplicate} · 오류 {result.invalid} · 제외 {result.excluded}. 만든 초안은 테스트 설계에서 검토 대기 상태로 확인할 수 있어요.
@@ -181,6 +181,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
               <Count label="선택 관점" value={summary.perspectiveCount} />
               <Count label="생성 후보" value={summary.created} />
               <Count label="기존 TC 연결" value={summary.linked} />
+              <Count label="생성 TC 연결" value={summary.linkedToNew} />
               <Count label="확인 필요" value={summary.needsConfirmation} />
               <Count label="중복" value={summary.duplicate} />
               <Count label="판단 필요" value={summary.pending} />

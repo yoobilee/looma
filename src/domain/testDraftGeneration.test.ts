@@ -141,9 +141,15 @@ describe('규칙 기반 후보', () => {
     ['boundary', '주문 번호 100234를 표시한다.'],
     ['permission', '광고 팝업을 차단한다.'],
     ['permission', '스팸 메일을 차단한다.'],
+    ['permission', '관리자 페이지에 로고를 표시한다.'],
+    ['permission', '운영자 화면 제목을 표시한다.'],
+    ['permission', '운영자 화면의 제목을 바꾼다.'],
+    ['permission', '관리자에게 공지 문구를 보여준다.'],
     ['permission', '설정 화면으로 접근한다.'],
     ['api', '가입 요청 시 안내 문구를 표시한다.'],
     ['api', '요청이 접수되면 완료 화면을 보여준다.'],
+    ['api', '사용자 요청에 응답한다.'],
+    ['api', '고객 요청에 응답 메시지를 보낸다.'],
     ['performance', '2026년 4월 목록을 보여준다.'],
     ['performance', '최대 3개의 항목을 표시한다.'],
     ['state_change', '비밀번호를 변경할 수 있다.'],
@@ -162,10 +168,17 @@ describe('규칙 기반 후보', () => {
     ['boundary', '제목은 최대 50자까지 입력할 수 있다.'],
     ['boundary', '수량은 1~99 범위에서 고른다.'],
     ['permission', '관리자 권한이 있는 사용자만 접근 가능하다.'],
+    ['permission', '관리자만 접근할 수 있다.'],
+    ['permission', '관리자 권한이 있는 사용자만 수정할 수 있다.'],
+    ['permission', '비로그인 사용자는 접근할 수 없다.'],
+    ['permission', '운영자 역할에만 메뉴를 노출한다.'],
+    ['permission', '권한이 없는 사용자는 사용할 수 없다.'],
     ['permission', '로그인하지 않은 사용자는 목록을 열람할 수 없다.'],
     ['api', 'API 요청 후 응답 값을 표시한다.'],
     ['api', '서버 응답이 실패하면 오류를 보여준다.'],
-    ['api', '로그인 요청이 성공하면 토큰을 응답한다.'],
+    ['api', '서버 요청이 성공하면 토큰을 응답한다.'],
+    ['api', '서버 요청 후 응답 데이터를 처리한다.'],
+    ['api', 'HTTP 요청 실패 시 상태 코드를 확인한다.'],
     ['performance', '응답 시간은 2초 이내여야 한다.'],
     ['performance', '동시 사용자 100명을 처리한다.'],
     ['performance', '목록은 3초 이내에 표시한다.'],
@@ -182,7 +195,7 @@ describe('규칙 기반 후보', () => {
 
   it('API · 성능은 프로젝트 범위에 있고 요구사항에 단서가 있을 때만 만들며 임의 값을 만들지 않는다', () => {
     const ctx = withRequirements(
-      requirement({ id: 'api', text: '로그인 요청이 성공하면 토큰을 응답한다.' }),
+      requirement({ id: 'api', text: '서버 요청이 성공하면 토큰을 응답한다.' }),
       requirement({ id: 'perf', text: '목록은 3초 이내에 표시한다.' }),
       requirement({ id: 'none', text: '약관에 동의한다.' }),
     );
@@ -278,12 +291,12 @@ describe('판정: 중복 · 조건 재사용 · 오류', () => {
     const analysis = only(ctx, ['normal_flow'], 'req-x');
     expect(analysis.rows[0]).toMatchObject({
       kind: 'duplicate',
-      duplicateTarget: { type: 'existing', id: 'tc-existing', label: 'SIGN-099', linked: false },
+      duplicateTarget: { type: 'existing', id: 'tc-existing', label: 'SIGN-099', linked: false, snapshot: expect.stringMatching(/^[0-9a-f]+$/) },
       reasons: ['같은 내용의 TC가 이미 있어요. 이 요구사항은 그 TC에 연결돼 있지 않아요.'],
     });
     // 고객사 ID가 없으면 내부 ID를 쓰고, 이미 연결돼 있으면 linked다.
     ctx.testCases = [existingTestCase(candidate, { externalId: undefined, requirementIds: ['req-x'] })];
-    expect(only(ctx, ['normal_flow'], 'req-x').rows[0].duplicateTarget).toEqual({ type: 'existing', id: 'tc-existing', label: 'tc-existing', linked: true });
+    expect(only(ctx, ['normal_flow'], 'req-x').rows[0].duplicateTarget).toMatchObject({ type: 'existing', id: 'tc-existing', label: 'tc-existing', linked: true });
   });
 
   it('비슷하기만 한 TC · 다른 구분 · 다른 프로젝트 · 폐기된 TC는 중복이 아니다(fuzzy 없음)', () => {
@@ -478,7 +491,8 @@ describe('중복 판단', () => {
     expect(linked.testCases[0].testConditionIds).toHaveLength(2);
     expect(linked.testConditions.map((item) => item.requirementIds)).toEqual([['r1'], ['r2']]);
     expect(linked.testCases[0].revision).toBe(1);
-    expect(linked.summary).toMatchObject({ created: 1, linked: 1 });
+    // 앞선 후보로 만드는 새 TC에 연결한 것이라 "기존 TC 연결"이 아니라 "생성 TC 연결"로 센다.
+    expect(linked.summary).toMatchObject({ created: 1, linked: 0, linkedToNew: 1 });
 
     const separate = plan(ctx, analysis, { 'normal_flow|r2': 'create_separate' });
     expect(separate.testCases.map((item) => item.requirementIds)).toEqual([['r1'], ['r2']]);
@@ -716,6 +730,7 @@ describe('저장 계획', () => {
       created: 3,
       separate: 0,
       linked: 0,
+      linkedToNew: 0,
       needsConfirmation: 0,
       duplicate: 0,
       duplicateSkipped: 0,

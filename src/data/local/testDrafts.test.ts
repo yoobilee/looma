@@ -115,7 +115,7 @@ describe('요구사항 기반 TC 초안 저장', () => {
       projectId: PROJECT_A,
       title: 'TC 초안 2건 생성',
       metadata: {
-        detail: '요구사항 2 · 관점 2 · 신규 TC 2(별도 신규 0) · 기존 TC 연결 0 · 테스트 조건 신규 2 · 재사용 0 · 중복 제외 0 · 제외 1',
+        detail: '요구사항 2 · 관점 2 · 신규 TC 2(별도 신규 0) · 기존 TC 연결 0 · 생성 TC 연결 0 · 테스트 조건 신규 2 · 재사용 0 · 중복 제외 0 · 제외 1',
         generatedTestCaseIds: result.testCases.map((item) => item.id).join(','),
       },
       createdAt: expect.any(String),
@@ -150,7 +150,7 @@ describe('요구사항 기반 TC 초안 저장', () => {
     expect(result.testCases[0].testConditionIds).toEqual(first.testCases[0].testConditionIds);
     expect(await repos.testConditions.listByProject(PROJECT_A)).toEqual(conditionsAfterFirst);
     const [latest] = await draftActivities(repos);
-    expect(latest.metadata.detail).toBe('요구사항 1 · 관점 1 · 신규 TC 1(별도 신규 0) · 기존 TC 연결 0 · 테스트 조건 신규 0 · 재사용 1 · 중복 제외 0 · 제외 0');
+    expect(latest.metadata.detail).toBe('요구사항 1 · 관점 1 · 신규 TC 1(별도 신규 0) · 기존 TC 연결 0 · 생성 TC 연결 0 · 테스트 조건 신규 0 · 재사용 1 · 중복 제외 0 · 제외 0');
   });
 
   it('확인 필요 요구사항은 needs_confirmation 초안으로 만들고 조건은 재검토 필요 상태다', async () => {
@@ -352,7 +352,7 @@ describe('중복 판단 저장', () => {
     const [activity] = await draftActivities(repos);
     expect(activity.title).toBe('기존 TC 1건 연결');
     expect(activity.metadata).toEqual({
-      detail: '요구사항 1 · 관점 1 · 신규 TC 0(별도 신규 0) · 기존 TC 연결 1 · 테스트 조건 신규 1 · 재사용 0 · 중복 제외 0 · 제외 0',
+      detail: '요구사항 1 · 관점 1 · 신규 TC 0(별도 신규 0) · 기존 TC 연결 1 · 생성 TC 연결 0 · 테스트 조건 신규 1 · 재사용 0 · 중복 제외 0 · 제외 0',
       generatedTestCaseIds: '',
     });
     expect(ready(repos).revision).toBe(before.revision + 1);
