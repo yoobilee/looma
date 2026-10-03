@@ -11,6 +11,7 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { SourceTypeTag, Tag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
+import { RequirementImportDialog } from './RequirementImportDialog';
 import styles from './RequirementsTab.module.css';
 
 type RequirementFilter = 'all' | 'changes' | 'confirm' | 'removed';
@@ -26,6 +27,7 @@ export function RequirementsTab() {
     ...project.testScopes.map((scope) => scopeDrivenPerspectives[scope]).filter((value): value is TestPerspective => !!value),
   ];
   const [perspectives, setPerspectives] = useState<TestPerspective[]>(basePerspectives);
+  const [importOpen, setImportOpen] = useState(false);
 
   const data = useRepositoryData(
     async (repos) => ({
@@ -40,23 +42,32 @@ export function RequirementsTab() {
   if (data.status === 'error') return <StateMessage tone="error" title="요구사항을 불러오지 못했어요." />;
 
   const { requirements, deliverables, issues } = data.data;
+  // 가져오기 중 목록이 비어 있음 ↔ 있음으로 바뀌어도 대화상자가 다시 만들어지지 않도록 두 화면 모두 같은 자리에 둔다.
+  const importDialog = importOpen ? <RequirementImportDialog open projectId={project.id} deliverables={deliverables} requirements={requirements} onClose={() => setImportOpen(false)} /> : null;
   if (requirements.length === 0) {
     return (
-      <StateMessage
-        title="분석된 요구사항이 없어요."
-        description={
-          deliverables.length === 0
-            ? '먼저 기획서나 디자인 산출물을 추가하세요.'
-            : 'AI 요구사항 분석은 아직 연결되지 않았어요. 연결되면 산출물에서 기능 단위로 요구사항을 추출합니다.'
-        }
-        action={
-          deliverables.length === 0 ? (
-            <Button variant="primary" onClick={openDeliverableCreate}>
-              산출물 추가
-            </Button>
-          ) : undefined
-        }
-      />
+      <>
+        <StateMessage
+          title="분석된 요구사항이 없어요."
+          description={
+            deliverables.length === 0
+              ? '먼저 기획서나 디자인 산출물을 추가하세요.'
+              : '요구사항 파일(CSV · XLSX)을 가져오거나, 이후 연결될 AI 분석으로 산출물에서 기능 단위 요구사항을 추출할 수 있어요. AI 분석은 아직 연결되지 않았어요.'
+          }
+          action={
+            deliverables.length === 0 ? (
+              <Button variant="primary" onClick={openDeliverableCreate}>
+                산출물 추가
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={() => setImportOpen(true)}>
+                요구사항 가져오기
+              </Button>
+            )
+          }
+        />
+        {importDialog}
+      </>
     );
   }
 
@@ -86,12 +97,18 @@ export function RequirementsTab() {
     });
 
   return (
+    <>
     <div className={styles.layout}>
       <section aria-labelledby="features-title" className={styles.main}>
         <SectionHeader
           id="features-title"
           title="분석된 기능"
           meta={`기능 ${new Set(current.map((item) => item.feature)).size} · 확인 필요 ${confirmItems.length}`}
+          action={
+            <Button variant="secondary" size="sm" disabled={deliverables.length === 0} onClick={() => setImportOpen(true)}>
+              요구사항 가져오기
+            </Button>
+          }
         />
         <p className={styles.legend}>
           <SourceTypeTag sourceType="source_explicit" /> 산출물에 적힌 내용
@@ -194,5 +211,7 @@ export function RequirementsTab() {
         </section>
       </aside>
     </div>
+    {importDialog}
+    </>
   );
 }

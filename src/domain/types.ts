@@ -462,6 +462,8 @@ export type ActivityType =
   | 'scratch_pinned'
   | 'deliverable_added'
   | 'requirements_analyzed'
+  /** 요구사항 파일(CSV · XLSX)을 가져옴. 변경 분석 검토 · 반영과는 다른 작업이다. */
+  | 'requirements_imported'
   | 'test_case_changed'
   | 'results_uploaded'
   | 'issue_created'

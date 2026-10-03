@@ -30,6 +30,7 @@ import type {
   TestAssetImportField,
   TestAssetMatchKind,
 } from './testAssetImport';
+import type { RequirementImportField, RequirementImportKind } from './requirementImport';
 import type { ResultConflictReason, ResultImportField, ResultMatchKind } from './testResultImport';
 import type { ResultChangeType } from './resultComparison';
 
@@ -258,6 +259,7 @@ export const activityTypeLabel: Record<ActivityType, string> = {
   scratch_pinned: '임시 자료 고정',
   deliverable_added: '산출물 추가',
   requirements_analyzed: '요구사항 분석',
+  requirements_imported: '요구사항 가져오기',
   test_case_changed: 'TC 변경',
   results_uploaded: '수행 결과 업로드',
   issue_created: '이슈 등록',
@@ -270,6 +272,19 @@ export const activityTypeLabel: Record<ActivityType, string> = {
 };
 
 /* TC 자산 가져오기 */
+export const requirementImportFieldLabel: Record<RequirementImportField, string> = {
+  feature: '기능',
+  text: '요구사항',
+  locator: '출처 위치',
+  needsConfirmation: '확인 필요',
+};
+
+export const requirementImportKindLabel: Record<RequirementImportKind, string> = {
+  create: '신규',
+  duplicate: '중복',
+  invalid: '오류',
+};
+
 export const testAssetImportFieldLabel: Record<TestAssetImportField, string> = {
   externalId: '고객사 TC ID',
   category: '구분(테스트 관점)',
