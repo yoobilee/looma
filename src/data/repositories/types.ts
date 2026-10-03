@@ -33,7 +33,7 @@ import type {
 } from '@/domain/types';
 import type { IssueChanges } from '@/domain/issues';
 import type { RequirementColumnMapping, RequirementImportSummary } from '@/domain/requirementImport';
-import type { TestDraftSummary } from '@/domain/testDraftGeneration';
+import type { TestDraftDecisionInput, TestDraftSummary } from '@/domain/testDraftGeneration';
 import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/domain/testAssetImport';
 import type { ResultColumnMapping, ResultCycleInput, ResultImportRowDecision, ResultValueDecision } from '@/domain/testResultImport';
 
@@ -125,18 +125,19 @@ export interface CreateTestDraftsInput {
   /** TC 초안의 근거가 될 이 프로젝트의 요구사항(제거되지 않은 것) */
   requirementIds: string[];
   perspectives: TestPerspective[];
-  /** 만들 수 있는 후보 중 사용자가 뺀 후보의 key(testDraftCandidateKey) */
-  excludedKeys: string[];
+  /** 미리보기에서 본 모든 후보와 사용자의 판단. 저장할 때 현재 데이터로 다시 분석해 지문이 모두 같을 때만 반영한다. */
+  candidates: TestDraftDecisionInput[];
 }
 
 export interface TestCaseRepository {
   listByProject(projectId: string): Promise<TestCase[]>;
   updateStatus(id: string, status: TestCaseStatus): Promise<TestCase>;
   /**
-   * 요구사항과 테스트 관점으로 테스트 조건 · TC 초안을 한 번에 만든다. 현재 프로젝트 · 요구사항 · 테스트 조건 · TC 기준으로 다시 계산하고,
-   * 기존 TC · 테스트 조건은 바꾸지 않는다. 만들 후보가 없거나 입력이 맞지 않으면 아무것도 저장하지 않는다. 활동 기록도 같은 저장에 남는다.
+   * 요구사항과 테스트 관점으로 테스트 조건 · TC 초안을 한 번에 만든다. 현재 프로젝트 · 요구사항 · 테스트 조건 · TC 기준으로 다시 분석해 미리보기와 같은 후보(지문)만 반영한다.
+   * 기존 TC는 사용자가 연결을 고른 중복에 한해 요구사항 · 조건 · 근거 연결만 더하고 내용은 바꾸지 않는다. 기존 테스트 조건은 바꾸지 않는다.
+   * 입력이 맞지 않거나 미리보기가 오래됐거나 판단하지 않은 중복이 있거나 반영할 것이 없으면 아무것도 저장하지 않는다. 활동 기록도 같은 저장에 남는다.
    */
-  createDraftsFromRequirements(input: CreateTestDraftsInput): Promise<{ testCases: TestCase[]; testConditions: TestCondition[]; summary: TestDraftSummary }>;
+  createDraftsFromRequirements(input: CreateTestDraftsInput): Promise<{ testCases: TestCase[]; updatedTestCases: TestCase[]; testConditions: TestCondition[]; summary: TestDraftSummary }>;
 }
 
 /** 가져온 원본 파일. 표를 읽은 바로 그 bytes를 넘긴다(다시 쓴 파일이 아니다). */

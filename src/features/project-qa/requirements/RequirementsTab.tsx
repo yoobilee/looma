@@ -40,14 +40,16 @@ export function RequirementsTab() {
       issues: await repos.issues.listByProject(project.id),
       testConditions: await repos.testConditions.listByProject(project.id),
       testCases: await repos.testCases.listByProject(project.id),
+      // 새 TC에 붙일 프로젝트 양식. 실제로 있고 이 프로젝트에서 쓸 수 있는지 미리보기에서 확인한다.
+      templates: project.tcTemplateId ? [await repos.templates.get(project.tcTemplateId)].filter((item): item is NonNullable<typeof item> => !!item) : [],
     }),
-    [project.id],
+    [project.id, project.tcTemplateId],
   );
 
   if (data.status === 'loading') return <LoadingState />;
   if (data.status === 'error') return <StateMessage tone="error" title="요구사항을 불러오지 못했어요." />;
 
-  const { requirements, deliverables, issues, testConditions, testCases } = data.data;
+  const { requirements, deliverables, issues, testConditions, testCases, templates } = data.data;
   // 가져오기 중 목록이 비어 있음 ↔ 있음으로 바뀌어도 대화상자가 다시 만들어지지 않도록 두 화면 모두 같은 자리에 둔다.
   const importDialog = importOpen ? <RequirementImportDialog open projectId={project.id} deliverables={deliverables} requirements={requirements} onClose={() => setImportOpen(false)} /> : null;
   if (requirements.length === 0) {
@@ -246,6 +248,7 @@ export function RequirementsTab() {
         deliverables={deliverables}
         testConditions={testConditions}
         testCases={testCases}
+        templates={templates}
         requirementIds={targetIds}
         perspectives={perspectives}
         onClose={() => setDraftOpen(false)}

@@ -1,27 +1,35 @@
 import { testPerspectiveLabel } from './labels';
-import type { Deliverable, Project, Requirement, SourceRef, TestCase, TestCaseGenerationType, TestCondition, TestPerspective } from './types';
+import type { Deliverable, Project, Requirement, SourceRef, TCTemplate, TestCase, TestCaseGenerationType, TestCondition, TestPerspective } from './types';
 
 /*
  * 요구사항 기반 TC 초안 생성 — AI 없이 요구사항과 사용자가 고른 테스트 관점에서 TestCondition · TestCase 초안을 만든다.
  *
- *   요구사항 + 관점 ─ 후보 생산자(지금은 규칙 기반) ─▶ TestDraftCandidate[] ─ 분석(중복 · 오류 · 조건 재사용) ─▶ 사용자 검토 · 제외 ─▶ 저장 계획
+ *   요구사항 + 관점 ─ 후보 생산자(지금은 규칙 기반) ─▶ TestDraftCandidate[] ─ 분석(중복 · 오류 · 조건 재사용) ─▶ 사용자 검토 · 판단 ─▶ 저장 계획
  *
  * 후보 생산자만 갈아 끼울 수 있다. 나중에 AI가 같은 TestDraftCandidate를 만들면 analyzeTestDraftCandidates부터 그대로 쓴다.
  * 규칙 기반 생산자는 요구사항에 없는 구체값(화면 문구 · 버튼 이름 · API 경로 · 상태 코드 · 시간 · 브라우저 버전)을 만들지 않는다.
  * 단서가 있는 관점(경계값 · 권한 · 상태 변화 · 데이터 · API · 성능)은 요구사항 문장에 그 단서가 있을 때만 후보를 만든다.
- * 기존 TC · 테스트 조건은 읽기만 하고 고치지 않는다. 모든 계산은 입력을 바꾸지 않는다.
+ *
+ * 저장은 사용자가 본 미리보기와 같은 후보만 한다: 후보마다 지문(fingerprint)을 만들고, 저장할 때 현재 데이터로 다시 분석해 지문이 모두 같을 때만 반영한다.
+ * 중복 후보는 사용자가 판단해야 한다(기존 TC와 연결 · 별도 신규 · 제외). 기존 TC는 연결을 고른 경우에만, 요구사항 · 조건 · 근거 연결만 더하고 내용은 바꾸지 않는다.
+ * 모든 계산은 입력을 바꾸지 않는다.
  */
 
 export class TestDraftGenerationError extends Error {}
+
+/** 미리보기 뒤에 요구사항 · 기존 TC가 바뀌어 사용자가 본 후보와 달라졌다. */
+export class StaleTestDraftPreviewError extends TestDraftGenerationError {}
+
+export const STALE_TEST_DRAFT_PREVIEW_MESSAGE = '요구사항이나 기존 TC가 바뀌어 미리보기를 다시 확인해 주세요.';
 
 /* ---------- 후보 ---------- */
 
 /** 요구사항 하나(또는 여럿)와 관점 하나에서 나온 TC 초안 후보. 파일 · 규칙 · AI 어디서 만들었는지는 모른다. */
 export interface TestDraftCandidate {
-  /** 후보를 가리키는 값. 같은 관점 · 같은 요구사항 조합은 같은 key라 사용자의 제외 판단을 다시 찾을 수 있다. */
+  /** 후보를 가리키는 값. 같은 관점 · 같은 요구사항 조합은 같은 key다. */
   key: string;
   perspective: TestPerspective;
-  /** 근거 요구사항. 여럿이 한 후보에 이어질 수 있다. */
+  /** 근거 요구사항. 여럿이 한 후보에 이어질 수 있다. 분석할 때 중복을 없애고 정렬한다. */
   requirementIds: string[];
   /** 요구사항에서 물려받은 근거 유형. 확인 필요면 검토 완료로 표시할 수 없다. */
   generationType: TestCaseGenerationType;
@@ -29,7 +37,10 @@ export interface TestDraftCandidate {
   testCase: { feature: string; depth: string[]; title: string; precondition?: string; steps: string[]; expectedResult: string };
 }
 
-export const testDraftCandidateKey = (perspective: TestPerspective, requirementIds: string[]) => `${perspective}|${requirementIds.join(',')}`;
+/** 요구사항 ID 집합. 중복은 한 번만 세고 순서는 정렬로 고정한다(입력은 바꾸지 않는다). */
+const normalizeIds = (ids: string[]) => [...new Set(ids)].sort();
+
+export const testDraftCandidateKey = (perspective: TestPerspective, requirementIds: string[]) => `${perspective}|${normalizeIds(requirementIds).join(',')}`;
 
 export interface TestDraftContext {
   project: Pick<Project, 'id' | 'platforms' | 'testScopes' | 'tcTemplateId'>;
@@ -37,6 +48,8 @@ export interface TestDraftContext {
   deliverables: Deliverable[];
   testConditions: TestCondition[];
   testCases: TestCase[];
+  /** 프로젝트가 쓰는 TC 양식(있다면). 새 TC에 양식 ID를 붙이기 전에 실제로 쓸 수 있는지 확인한다. */
+  templates: Pick<TCTemplate, 'id' | 'projectId'>[];
 }
 
 export interface TestDraftRequest {
@@ -54,6 +67,18 @@ export const isTestDraftEligible = (requirement: Requirement, projectId: string)
 /** 관점이 이 프로젝트에서 쓸 수 있는지 */
 export function isPerspectiveAvailable(perspective: TestPerspective, project: Pick<Project, 'testScopes'>): boolean {
   return !(scopeDrivenPerspectives as readonly string[]).includes(perspective) || project.testScopes.includes(perspective as 'api' | 'performance' | 'compatibility');
+}
+
+/**
+ * 프로젝트의 TC 양식을 새 TC에 붙일 수 있는가. 양식이 없는 프로젝트는 양식 없이 만든다.
+ * 있다면 실제로 존재해야 하고, 이 프로젝트 전용이거나 프로젝트가 정해지지 않은 공용 양식이어야 한다(다른 프로젝트 전용 양식은 쓰지 않는다).
+ */
+export function validateDraftTemplate(context: Pick<TestDraftContext, 'project' | 'templates'>): void {
+  const id = context.project.tcTemplateId;
+  if (!id) return;
+  const template = context.templates.find((item) => item.id === id);
+  if (!template) throw new TestDraftGenerationError(`프로젝트의 TC 양식을 찾을 수 없어요. (${id})`);
+  if (template.projectId !== undefined && template.projectId !== context.project.id) throw new TestDraftGenerationError(`다른 프로젝트의 TC 양식은 쓸 수 없어요. (${id})`);
 }
 
 function validateRequest(context: TestDraftContext, request: TestDraftRequest): Requirement[] {
@@ -84,14 +109,23 @@ const clean = (value: string) => value.normalize('NFC').replace(/\s+/g, ' ').tri
 /** 문장 끝의 마침표를 뺀 요구사항 문장 */
 const sentence = (requirement: Requirement) => clean(requirement.text).replace(/[.。]+$/, '');
 
-/** 요구사항 문장에 이 관점의 단서가 있는가. 단서가 없는 관점은 억지로 만들지 않는다. */
+/**
+ * 요구사항 문장에 이 관점의 단서가 있는가. 단서가 없는 관점은 억지로 만들지 않는다.
+ * 일반적인 낱말 하나(숫자 · 차단 · 요청 · 입력 · 변경)만으로는 단서로 보지 않고, 그 관점의 뜻이 분명한 표현을 요구한다.
+ */
 const clues: Partial<Record<TestPerspective, RegExp>> = {
-  boundary: /\d|최소|최대|이상|이하|초과|미만|이내/,
-  permission: /권한|역할|관리자|운영자|접근|비회원|열람|승인|허용|차단|admin/i,
-  state_change: /유지|변경|전환|재실행|재시작|재접속|복원|종료|만료|상태/,
-  data_io: /조회|저장|입력|출력|반영|등록|수정|삭제|전송|발송|보내|보낸|불러|업로드|다운로드/,
-  api: /\bapi\b|엔드포인트|endpoint|요청|응답|호출|토큰/i,
-  performance: /\d+\s*(ms|밀리초|초|분)|응답\s*시간|속도|동시|처리량|tps|로딩|성능/i,
+  // 숫자만으로는 부족하다(연도 · 버전 · 번호). 한계를 뜻하는 말이 있거나 숫자 바로 뒤에 이상 · 이하 · 초과 · 미만 · 이내가 와야 한다.
+  boundary: /최소|최대|\d[\d,.]*\s*[가-힣A-Za-z%]{0,3}\s*(?:이상|이하|초과|미만|이내)|길이|자리|범위|\d+\s*개\s*까지|\d+\s*[~∼]\s*\d+/,
+  // 접근 · 허용 · 차단 같은 말 하나로는 부족하다. 권한 · 역할 · 관리자처럼 접근 제어를 뜻하거나 사용자 구분이 분명해야 한다.
+  permission: /권한|역할|관리자|운영자|비로그인|비회원|로그인하지\s*않은|로그인한\s*사용자|접근\s*(?:제어|가능|불가|제한)|접근이\s*(?:허용|차단|제한)|admin/i,
+  // "변경" · "종료"처럼 일반적인 말은 뺐다. 상태가 이어지거나 바뀌는 것을 뜻하는 표현만 쓴다.
+  state_change: /유지|전환|재실행|재시작|재접속|재진입|복원|만료|상태\s*(?:변화|변경)|상태가\s*바뀌|종료\s*(?:후|했다가|한\s*뒤)/,
+  // "입력" · "수정" · "보냄"은 뺐다. 데이터를 저장 · 조회 · 주고받는 것을 뜻하는 표현만 쓴다.
+  data_io: /저장|조회|불러오|업로드|다운로드|내보내기|가져오기|등록|삭제|전송|데이터|반영되/,
+  // "요청" 하나로는 부족하다. API · HTTP처럼 명시되거나 요청과 응답이 함께 적혀야 한다.
+  api: /\bapi\b|엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|상태\s*코드|서버\s*응답|요청.{0,20}응답|응답.{0,20}요청|request.{0,30}response/i,
+  // 숫자만으로는 부족하다. 성능 · 시간 · 처리량을 뜻하는 표현이 있어야 한다.
+  performance: /성능|지연|latency|throughput|\btps\b|동시\s*(?:사용자|접속)|\d+\s*(?:ms|밀리초|초)\s*(?:이내|이하|안에|미만)|(?:응답|처리|로딩)\s*시간/i,
 };
 
 /** 경계값 단서 중 숫자가 붙은 표현(예: 8자). 단계에 그대로 옮겨 적는다. */
@@ -110,6 +144,8 @@ interface Draft {
   steps: string[];
   expected: string;
 }
+
+const platformName: Record<Project['platforms'][number], string> = { android: 'Android', ios: 'iOS', web: 'Web', desktop: 'Desktop' };
 
 /** 관점별 일반 초안. 요구사항 문장만 인용하고 문구 · 값 · 절차를 새로 지어내지 않는다. */
 function draftFor(perspective: TestPerspective, requirement: Requirement, project: TestDraftContext['project']): Draft | { skip: string } {
@@ -167,8 +203,6 @@ function draftFor(perspective: TestPerspective, requirement: Requirement, projec
   }
 }
 
-const platformName: Record<Project['platforms'][number], string> = { android: 'Android', ios: 'iOS', web: 'Web', desktop: 'Desktop' };
-
 export interface SkippedTestDraft {
   requirementId: string;
   perspective: TestPerspective;
@@ -207,23 +241,34 @@ export function produceRuleBasedTestDrafts(context: TestDraftContext, request: T
 
 /* ---------- 분석 ---------- */
 
-/** create: 새 TC 초안으로 만들 수 있음 / duplicate: 같은 내용의 TC가 이미 있음 / invalid: 만들 수 없는 후보 */
+/** create: 새 TC 초안으로 만들 수 있음 / duplicate: 같은 내용의 TC가 이미 있거나 앞선 후보와 같음(사용자가 판단) / invalid: 만들 수 없는 후보 */
 export type TestDraftKind = 'create' | 'duplicate' | 'invalid';
 
 export const testDraftKindOrder: TestDraftKind[] = ['create', 'duplicate', 'invalid'];
+
+/**
+ * 후보마다 사용자가 내리는 판단. 저장하지 않는 미리보기 · 저장 입력용 값이다.
+ * create: 새 TC로 만듦 / link_existing: 같은 내용의 기존(또는 앞선) TC에 요구사항 · 조건 · 근거 연결만 더함 /
+ * create_separate: 중복이어도 별도 새 TC로 만듦 / excluded: 아무것도 하지 않음 / pending: 아직 판단하지 않음(저장할 수 없다).
+ */
+export type TestDraftDecision = 'create' | 'link_existing' | 'create_separate' | 'excluded' | 'pending';
+
+/** 중복의 비교 대상. existing은 이미 있는 TC(linked: 이 후보의 요구사항이 이미 그 TC에 연결됨), batch는 이번에 만드는 앞선 후보다. */
+export type TestDraftDuplicateTarget = { type: 'existing'; id: string; label: string; linked: boolean } | { type: 'batch'; key: string };
 
 export interface AnalyzedTestDraft {
   candidate: TestDraftCandidate;
   kind: TestDraftKind;
   reasons: string[];
-  /** create에서 확인 필요 요구사항에서 온 후보(검토 완료로 표시할 수 없다) */
+  /** 확인 필요 요구사항에서 온 후보(검토 완료로 표시할 수 없다) */
   needsConfirmation: boolean;
   /** create에서 이미 있는 같은 테스트 조건을 다시 쓰면 그 ID */
   reusedConditionId?: string;
-  /** duplicate에서 같은 내용의 기존 TC. label은 고객사 ID가 있으면 그것, 없으면 내부 ID */
-  duplicateOf?: { id: string; label: string };
+  duplicateTarget?: TestDraftDuplicateTarget;
   /** 연결 요구사항의 근거를 합친 것(산출물 + 위치 기준 중복 없음) */
   sourceRefs: SourceRef[];
+  /** 사용자가 본 후보 · 판정 · 비교 대상을 나타내는 값. 저장할 때 현재 데이터로 다시 계산해 같을 때만 반영한다. */
+  fingerprint: string;
 }
 
 export interface TestDraftAnalysis {
@@ -234,15 +279,59 @@ export interface TestDraftAnalysis {
   perspectiveCount: number;
 }
 
-const conditionIdentity = (requirementIds: string[], feature: string, title: string) => `${[...requirementIds].sort().join(',')}\u0000${clean(feature)}\u0000${clean(title)}`;
+const conditionIdentity = (requirementIds: string[], feature: string, title: string) => `${normalizeIds(requirementIds).join(',')}\u0000${clean(feature)}\u0000${clean(title)}`;
 const testCaseIdentity = (category: string, feature: string, title: string, steps: string[], expected: string) =>
   [category, clean(feature), clean(title), steps.map(clean).join('\u0001'), clean(expected)].join('\u0000');
+
+/** 결정적인 문자열 해시(cyrb53). 난수 · 시간 · 브라우저 암호 API 없이 같은 입력이면 항상 같은 값이다. */
+function hash53(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+}
+
+/** 후보 내용 · 근거 · 판정 · 비교 대상으로 만든 지문. 필드 순서가 고정된 배열을 직렬화해 안정적이다. */
+function fingerprintOf(row: Omit<AnalyzedTestDraft, 'fingerprint'>, targetState: unknown): string {
+  const { candidate: c } = row;
+  return hash53(
+    JSON.stringify([
+      'v1',
+      c.key,
+      c.perspective,
+      c.requirementIds,
+      c.generationType,
+      c.condition.feature,
+      c.condition.title,
+      c.testCase.feature,
+      c.testCase.depth,
+      c.testCase.title,
+      c.testCase.precondition ?? null,
+      c.testCase.steps,
+      c.testCase.expectedResult,
+      row.sourceRefs.map((ref) => [ref.deliverableId, ref.locator]),
+      row.kind,
+      row.reasons,
+      row.needsConfirmation,
+      row.reusedConditionId ?? null,
+      targetState,
+    ]),
+  );
+}
 
 /**
  * 후보를 판정한다. 후보가 어디서 왔든 같은 규칙이다.
  * - 같은 프로젝트의 요구사항이 아니거나 제거된 요구사항이거나 근거 산출물이 이 프로젝트에 없으면 오류(invalid)다.
  * - 구분 · 기능 · 제목 · 절차 · 기대 결과가 정확히 같은(공백 · 유니코드 정규화만 무시) 기존 TC(폐기 제외)나 앞선 후보가 있으면 중복이다. 비슷한 것은 같다고 보지 않는다.
- * - 같은 프로젝트 · 같은 요구사항 · 같은 기능 · 같은 제목의 테스트 조건이 이미 있으면(폐기 제외) 새로 만들지 않고 다시 쓴다.
+ *   중복은 자동으로 버리지 않고 사용자가 판단한다. 비교 대상(기존 TC 또는 앞선 후보)과, 기존 TC에 이 후보의 요구사항이 이미 연결돼 있는지를 함께 돌려준다.
+ * - 같은 프로젝트 · 같은 요구사항 집합 · 같은 기능 · 같은 제목의 테스트 조건이 이미 있으면(폐기 제외) 새로 만들지 않고 다시 쓴다.
+ * 양식(템플릿)을 쓸 수 없으면 후보를 판정하기 전에 던진다. 입력 후보는 바꾸지 않고 요구사항 ID는 중복을 없애 정렬한 복사본으로 판정한다.
  */
 export function analyzeTestDraftCandidates(
   context: TestDraftContext,
@@ -250,6 +339,7 @@ export function analyzeTestDraftCandidates(
   skipped: SkippedTestDraft[],
   counts: { requirementCount: number; perspectiveCount: number },
 ): TestDraftAnalysis {
+  validateDraftTemplate(context);
   const requirementById = new Map(context.requirements.filter((item) => item.projectId === context.project.id).map((item) => [item.id, item]));
   const deliverableIds = new Set(context.deliverables.filter((item) => item.projectId === context.project.id).map((item) => item.id));
   const existingTestCases = new Map<string, TestCase>();
@@ -266,8 +356,9 @@ export function analyzeTestDraftCandidates(
   }
 
   const seenKeys = new Set<string>();
-  const seenTestCases = new Set<string>();
-  const rows = candidates.map((candidate): AnalyzedTestDraft => {
+  const firstKeyByIdentity = new Map<string, string>();
+  const rows = candidates.map((input): AnalyzedTestDraft => {
+    const candidate: TestDraftCandidate = { ...input, requirementIds: normalizeIds(input.requirementIds) };
     if (seenKeys.has(candidate.key)) throw new TestDraftGenerationError(`같은 후보가 두 번 있어요. (${candidate.key})`);
     seenKeys.add(candidate.key);
     const needsConfirmation = candidate.generationType === 'needs_confirmation';
@@ -287,23 +378,47 @@ export function analyzeTestDraftCandidates(
           reasons.push(`근거 산출물을 찾을 수 없어요. (${ref.deliverableId})`);
           continue;
         }
-        const identity = `${ref.deliverableId}\u0000${ref.locator}`;
-        if (seenRefs.has(identity)) continue;
-        seenRefs.add(identity);
+        const refIdentity = `${ref.deliverableId}\u0000${ref.locator}`;
+        if (seenRefs.has(refIdentity)) continue;
+        seenRefs.add(refIdentity);
         sourceRefs.push({ deliverableId: ref.deliverableId, locator: ref.locator });
       }
     }
-    if (reasons.length > 0) return { candidate, kind: 'invalid', reasons: [...new Set(reasons)], needsConfirmation, sourceRefs: [] };
+    if (reasons.length > 0) {
+      const row = { candidate, kind: 'invalid' as const, reasons: [...new Set(reasons)], needsConfirmation, sourceRefs: [] };
+      return { ...row, fingerprint: fingerprintOf(row, null) };
+    }
 
     const identity = testCaseIdentity(candidate.perspective, candidate.testCase.feature, candidate.testCase.title, candidate.testCase.steps, candidate.testCase.expectedResult);
     const existing = existingTestCases.get(identity);
     if (existing) {
-      return { candidate, kind: 'duplicate', reasons: ['같은 내용의 TC가 이미 있어요.'], needsConfirmation, duplicateOf: { id: existing.id, label: existing.externalId ?? existing.id }, sourceRefs };
+      const alreadyLinked = candidate.requirementIds.every((id) => existing.requirementIds.includes(id));
+      const row = {
+        candidate,
+        kind: 'duplicate' as const,
+        reasons: [alreadyLinked ? '같은 내용의 TC가 이미 있고 이 요구사항이 연결돼 있어요.' : '같은 내용의 TC가 이미 있어요. 이 요구사항은 그 TC에 연결돼 있지 않아요.'],
+        needsConfirmation,
+        duplicateTarget: { type: 'existing' as const, id: existing.id, label: existing.externalId ?? existing.id, linked: alreadyLinked },
+        sourceRefs,
+      };
+      return { ...row, fingerprint: fingerprintOf(row, ['existing', existing.id, alreadyLinked, normalizeIds(existing.requirementIds), existing.status]) };
     }
-    if (seenTestCases.has(identity)) return { candidate, kind: 'duplicate', reasons: ['이번에 만드는 다른 후보와 같은 내용이에요.'], needsConfirmation, sourceRefs };
-    seenTestCases.add(identity);
+    const firstKey = firstKeyByIdentity.get(identity);
+    if (firstKey !== undefined) {
+      const row = {
+        candidate,
+        kind: 'duplicate' as const,
+        reasons: ['이번에 만드는 다른 후보와 같은 내용이에요. 이 요구사항은 그 후보의 TC에 연결되지 않아요.'],
+        needsConfirmation,
+        duplicateTarget: { type: 'batch' as const, key: firstKey },
+        sourceRefs,
+      };
+      return { ...row, fingerprint: fingerprintOf(row, ['batch', firstKey]) };
+    }
+    firstKeyByIdentity.set(identity, candidate.key);
     const reused = existingConditions.get(conditionIdentity(candidate.requirementIds, candidate.condition.feature, candidate.condition.title));
-    return { candidate, kind: 'create', reasons: [], needsConfirmation, ...(reused && { reusedConditionId: reused.id }), sourceRefs };
+    const row = { candidate, kind: 'create' as const, reasons: [], needsConfirmation, ...(reused && { reusedConditionId: reused.id }), sourceRefs };
+    return { ...row, fingerprint: fingerprintOf(row, null) };
   });
   return { rows, skipped, ...counts };
 }
@@ -314,101 +429,201 @@ export function analyzeTestDraftGeneration(context: TestDraftContext, request: T
   return analyzeTestDraftCandidates(context, candidates, skipped, { requirementCount: request.requirementIds.length, perspectiveCount: request.perspectives.length });
 }
 
+/* ---------- 판단 ---------- */
+
+/** 판단을 고르지 않았을 때의 값. 중복은 사용자가 정해야 하므로 pending이고, 이미 연결된 중복 · 오류 후보는 할 일이 없어 excluded다. */
+export function defaultTestDraftDecision(row: AnalyzedTestDraft): TestDraftDecision {
+  if (row.kind === 'create') return 'create';
+  if (row.kind === 'duplicate' && !(row.duplicateTarget?.type === 'existing' && row.duplicateTarget.linked)) return 'pending';
+  return 'excluded';
+}
+
+/** 후보가 고를 수 있는 판단. pending은 고르는 값이 아니라 판단 전 상태라 넣지 않는다. */
+export function testDraftDecisionOptions(row: AnalyzedTestDraft): TestDraftDecision[] {
+  if (row.kind === 'create') return ['create', 'excluded'];
+  if (row.kind === 'invalid') return [];
+  const alreadyLinked = row.duplicateTarget?.type === 'existing' && row.duplicateTarget.linked;
+  return alreadyLinked ? ['create_separate', 'excluded'] : ['link_existing', 'create_separate', 'excluded'];
+}
+
+/**
+ * 사용자가 고른 판단(chosen)을 모든 후보의 유효한 판단으로 바꾼다. 고르지 않았거나 고를 수 없는 값이면 기본값이다.
+ * 이번에 만드는 앞선 후보에 연결하기로 했는데 그 후보를 만들지 않게 되면 연결할 곳이 없으므로 다시 pending으로 돌린다.
+ */
+export function resolveTestDraftDecisions(analysis: TestDraftAnalysis, chosen: Readonly<Record<string, TestDraftDecision>> = {}): Record<string, TestDraftDecision> {
+  const resolved: Record<string, TestDraftDecision> = {};
+  for (const row of analysis.rows) {
+    const value = chosen[row.candidate.key];
+    resolved[row.candidate.key] = value !== undefined && testDraftDecisionOptions(row).includes(value) ? value : defaultTestDraftDecision(row);
+  }
+  for (const row of analysis.rows) {
+    const target = row.duplicateTarget;
+    if (resolved[row.candidate.key] === 'link_existing' && target?.type === 'batch' && resolved[target.key] !== 'create') resolved[row.candidate.key] = 'pending';
+  }
+  return resolved;
+}
+
 export interface TestDraftSummary {
   requirementCount: number;
   perspectiveCount: number;
-  /** 만들 수 있었던 후보에서 사용자가 제외하지 않은 것(확인 필요 포함) */
+  /** 새로 만드는 TC(신규 + 중복이지만 별도 신규) */
   created: number;
+  /** created 중 중복이지만 별도 신규로 만드는 것 */
+  separate: number;
+  /** 같은 내용의 기존(또는 앞선) TC에 요구사항을 연결하는 것 */
+  linked: number;
   /** created 중 확인 필요 요구사항에서 온 것 */
   needsConfirmation: number;
+  /** 중복 후보 전체 */
   duplicate: number;
+  /** 중복 후보 중 아무것도 하지 않는 것(이미 연결됨 · 제외) */
+  duplicateSkipped: number;
+  /** 아직 판단하지 않은 중복 */
+  pending: number;
   invalid: number;
-  /** 만들 수 있었지만 사용자가 뺀 후보 */
+  /** 만들 수 있었지만 사용자가 뺀 신규 후보 */
   excluded: number;
   /** 단서가 없어 후보를 만들지 않은 조합 */
   skipped: number;
 }
 
-export function summarizeTestDraftAnalysis(analysis: TestDraftAnalysis, excludedKeys: readonly string[] = []): TestDraftSummary {
-  const excluded = new Set(excludedKeys);
-  const creatable = analysis.rows.filter((row) => row.kind === 'create');
-  const kept = creatable.filter((row) => !excluded.has(row.candidate.key));
+export function summarizeTestDraftAnalysis(analysis: TestDraftAnalysis, decisions: Readonly<Record<string, TestDraftDecision>> = {}): TestDraftSummary {
+  const resolved = resolveTestDraftDecisions(analysis, decisions);
+  const rowsWith = (...values: TestDraftDecision[]) => analysis.rows.filter((row) => values.includes(resolved[row.candidate.key]));
+  const creating = rowsWith('create', 'create_separate');
+  const duplicates = analysis.rows.filter((row) => row.kind === 'duplicate');
   return {
     requirementCount: analysis.requirementCount,
     perspectiveCount: analysis.perspectiveCount,
-    created: kept.length,
-    needsConfirmation: kept.filter((row) => row.needsConfirmation).length,
-    duplicate: analysis.rows.filter((row) => row.kind === 'duplicate').length,
+    created: creating.length,
+    separate: rowsWith('create_separate').length,
+    linked: rowsWith('link_existing').length,
+    needsConfirmation: creating.filter((row) => row.needsConfirmation).length,
+    duplicate: duplicates.length,
+    duplicateSkipped: duplicates.filter((row) => resolved[row.candidate.key] === 'excluded').length,
+    pending: duplicates.filter((row) => resolved[row.candidate.key] === 'pending').length,
     invalid: analysis.rows.filter((row) => row.kind === 'invalid').length,
-    excluded: creatable.length - kept.length,
+    excluded: analysis.rows.filter((row) => row.kind === 'create' && resolved[row.candidate.key] === 'excluded').length,
     skipped: analysis.skipped.length,
   };
 }
 
 /* ---------- 저장 계획 ---------- */
 
+/** 저장 입력의 후보 하나. 미리보기에서 본 후보(key · fingerprint)와 사용자의 판단이다. */
+export interface TestDraftDecisionInput {
+  key: string;
+  fingerprint: string;
+  decision: TestDraftDecision;
+}
+
+/** 분석과 판단으로 저장 입력을 만든다. 모든 후보를 빠짐없이 담는다. */
+export function toTestDraftDecisionInputs(analysis: TestDraftAnalysis, decisions: Readonly<Record<string, TestDraftDecision>> = {}): TestDraftDecisionInput[] {
+  const resolved = resolveTestDraftDecisions(analysis, decisions);
+  return analysis.rows.map((row) => ({ key: row.candidate.key, fingerprint: row.fingerprint, decision: resolved[row.candidate.key] }));
+}
+
 export interface TestDraftPlanOptions {
   createId: (prefix: string) => string;
-  /** 새로 만드는 모든 항목의 시각 */
+  /** 새로 만들거나 바꾸는 모든 항목의 시각 */
   now: string;
 }
 
 export interface TestDraftPlan {
   testConditions: TestCondition[];
+  /** 새로 만드는 TC */
   testCases: TestCase[];
+  /** 기존 TC에 요구사항 · 조건 · 근거 연결만 더한 결과(내용은 그대로). 연결한 기존 TC만 담긴다. */
+  updatedTestCases: TestCase[];
   summary: TestDraftSummary;
   /** 새 테스트 조건 수와 다시 쓴 수 */
   conditionsCreated: number;
   conditionsReused: number;
 }
 
-/**
- * 만들 항목을 계산한다(저장하지 않는다). 지금 새로 만들 수 있는 후보 중 제외하지 않은 것만 만든다.
- * 제외 목록은 "사용자가 만들 수 있는 후보를 뺀 결정"만 담는다: 없는 후보 · 중복 · 오류 · 같은 key 두 번은 조용히 무시하지 않고 던진다.
- * 만들 후보가 하나도 없으면 던진다. 새 TC는 초안(draft) · revision 1이고 고객사 TC ID(externalId)는 만들지 않는다.
- * 출처는 사람이 직접 만든 것이 아니라 규칙 기반이므로 origin은 manual(AI가 아님)로 두고 근거 유형은 요구사항에서 물려받는다.
- */
-export function planTestDraftGeneration(context: TestDraftContext, analysis: TestDraftAnalysis, excludedKeys: readonly string[], options: TestDraftPlanOptions): TestDraftPlan {
-  const creatableKeys = new Set(analysis.rows.filter((row) => row.kind === 'create').map((row) => row.candidate.key));
+const union = (a: string[], b: string[]) => [...new Set([...a, ...b])];
+const unionRefs = (a: SourceRef[], b: SourceRef[]): SourceRef[] => {
   const seen = new Set<string>();
-  for (const key of excludedKeys) {
-    if (seen.has(key)) throw new TestDraftGenerationError(`같은 후보를 제외 목록에 두 번 넣었어요. (${key})`);
-    seen.add(key);
-    if (!creatableKeys.has(key)) throw new TestDraftGenerationError(`제외할 수 있는 TC 초안 후보가 아니에요. (${key})`);
+  return [...a, ...b].filter((ref) => {
+    const identity = `${ref.deliverableId}\u0000${ref.locator}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+};
+
+/**
+ * 저장할 항목을 계산한다(저장하지 않는다). 순서: 지문 확인 → 판단 확인 → 양식 확인(분석에서 이미 함) → 계획. 하나라도 어긋나면 아무것도 만들지 않고 던진다.
+ * - 입력의 후보는 분석한 후보와 정확히 같아야 한다(빠짐 · 더함 · 두 번 · 지문 불일치는 모두 오래된 미리보기로 거부).
+ * - 신규는 create · excluded, 중복은 link_existing · create_separate · excluded만 받고 pending이 하나라도 있으면 거부한다. 이미 연결된 중복은 link_existing을 받지 않는다.
+ * - link_existing은 기존 TC의 요구사항 · 테스트 조건 · 근거 연결만 합집합으로 더하고 내용 · 상태 · 출처 · 고객사 ID는 바꾸지 않는다.
+ *   연결로 설계 연결이 바뀐 기존 TC는 변경 영향 분석과 같은 규칙(요구사항 · 조건 · 근거는 설계 내용)으로 revision을 1 올리고 updatedAt을 갱신한다.
+ *   이번에 만드는 앞선 후보에 연결하면 그 새 TC에 더하며 revision은 그대로(1)다.
+ * - 새 TC는 초안 · revision 1이고 고객사 ID를 만들지 않는다. origin은 manual(규칙 기반이며 AI가 아님)이고 근거 유형은 요구사항에서 물려받는다.
+ * 만들거나 연결할 것이 하나도 없으면 던진다.
+ */
+export function planTestDraftGeneration(context: TestDraftContext, analysis: TestDraftAnalysis, inputs: readonly TestDraftDecisionInput[], options: TestDraftPlanOptions): TestDraftPlan {
+  const rowByKey = new Map(analysis.rows.map((row) => [row.candidate.key, row]));
+  const seen = new Set<string>();
+  for (const input of inputs) {
+    const row = rowByKey.get(input.key);
+    if (seen.has(input.key) || !row || row.fingerprint !== input.fingerprint) throw new StaleTestDraftPreviewError(STALE_TEST_DRAFT_PREVIEW_MESSAGE);
+    seen.add(input.key);
   }
-  const excluded = new Set(excludedKeys);
-  const rows = analysis.rows.filter((row) => row.kind === 'create' && !excluded.has(row.candidate.key));
-  if (rows.length === 0) throw new TestDraftGenerationError('만들 수 있는 새 TC 초안이 없어요.');
+  if (analysis.rows.some((row) => !seen.has(row.candidate.key))) throw new StaleTestDraftPreviewError(STALE_TEST_DRAFT_PREVIEW_MESSAGE);
+
+  const decisionByKey = new Map(inputs.map((input) => [input.key, input.decision]));
+  let pending = 0;
+  for (const row of analysis.rows) {
+    const decision = decisionByKey.get(row.candidate.key)!;
+    if (decision === 'pending' && row.kind === 'duplicate') {
+      pending += 1;
+      continue;
+    }
+    if (!testDraftDecisionOptions(row).includes(decision) && !(row.kind === 'invalid' && decision === 'excluded')) {
+      throw new TestDraftGenerationError(`이 후보에는 쓸 수 없는 판단이에요. (${row.candidate.key}: ${decision})`);
+    }
+  }
+  if (pending > 0) throw new TestDraftGenerationError(`판단하지 않은 중복이 ${pending}건 있어요.`);
 
   const newConditions = new Map<string, TestCondition>();
   const testConditions: TestCondition[] = [];
-  const testCases: TestCase[] = [];
   let conditionsReused = 0;
-  for (const row of rows) {
-    const { candidate } = row;
-    let conditionId = row.reusedConditionId;
-    if (conditionId) conditionsReused += 1;
-    else {
-      const identity = conditionIdentity(candidate.requirementIds, candidate.condition.feature, candidate.condition.title);
-      let condition = newConditions.get(identity);
-      if (!condition) {
-        condition = {
-          id: options.createId('cond'),
-          projectId: context.project.id,
-          requirementIds: [...candidate.requirementIds],
-          feature: candidate.condition.feature,
-          title: candidate.condition.title,
-          // 확인 필요 요구사항의 조건은 정리가 끝나지 않았다.
-          status: row.needsConfirmation ? 'needs_review' : 'active',
-          createdAt: options.now,
-          updatedAt: options.now,
-        };
-        newConditions.set(identity, condition);
-        testConditions.push(condition);
-      } else conditionsReused += 1;
-      conditionId = condition.id;
+  const conditionIdFor = (row: AnalyzedTestDraft): string => {
+    const identity = conditionIdentity(row.candidate.requirementIds, row.candidate.condition.feature, row.candidate.condition.title);
+    const reused = row.reusedConditionId ?? existingConditionId(context, identity);
+    if (reused) {
+      conditionsReused += 1;
+      return reused;
     }
-    testCases.push({
+    let condition = newConditions.get(identity);
+    if (condition) {
+      conditionsReused += 1;
+      return condition.id;
+    }
+    condition = {
+      id: options.createId('cond'),
+      projectId: context.project.id,
+      requirementIds: [...row.candidate.requirementIds],
+      feature: row.candidate.condition.feature,
+      title: row.candidate.condition.title,
+      // 확인 필요 요구사항의 조건은 정리가 끝나지 않았다.
+      status: row.needsConfirmation ? 'needs_review' : 'active',
+      createdAt: options.now,
+      updatedAt: options.now,
+    };
+    newConditions.set(identity, condition);
+    testConditions.push(condition);
+    return condition.id;
+  };
+
+  const testCases: TestCase[] = [];
+  const newByKey = new Map<string, TestCase>();
+  for (const row of analysis.rows) {
+    const decision = decisionByKey.get(row.candidate.key)!;
+    if (decision !== 'create' && decision !== 'create_separate') continue;
+    const { candidate } = row;
+    const testCase: TestCase = {
       id: options.createId('tc'),
       projectId: context.project.id,
       ...(context.project.tcTemplateId && { templateId: context.project.tcTemplateId }),
@@ -421,7 +636,7 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
       steps: [...candidate.testCase.steps],
       expectedResult: candidate.testCase.expectedResult,
       requirementIds: [...candidate.requirementIds],
-      testConditionIds: [conditionId],
+      testConditionIds: [conditionIdFor(row)],
       sourceRefs: structuredClone(row.sourceRefs),
       generationType: candidate.generationType,
       origin: 'manual',
@@ -429,11 +644,56 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
       revision: 1,
       createdAt: options.now,
       updatedAt: options.now,
-    });
+    };
+    testCases.push(testCase);
+    newByKey.set(candidate.key, testCase);
   }
-  return { testConditions, testCases, summary: summarizeTestDraftAnalysis(analysis, excludedKeys), conditionsCreated: testConditions.length, conditionsReused };
+
+  // 연결: 기존 TC는 연결만 더하고, 이번에 만드는 앞선 후보의 TC에는 그 새 TC에 더한다.
+  const existingById = new Map(context.testCases.filter((item) => item.projectId === context.project.id).map((item) => [item.id, item]));
+  const linkedExisting = new Map<string, TestCase>();
+  for (const row of analysis.rows) {
+    if (decisionByKey.get(row.candidate.key) !== 'link_existing') continue;
+    const target = row.duplicateTarget!;
+    const conditionId = conditionIdFor(row);
+    const add = (testCase: TestCase): TestCase => ({
+      ...testCase,
+      requirementIds: union(testCase.requirementIds, row.candidate.requirementIds),
+      testConditionIds: union(testCase.testConditionIds, [conditionId]),
+      sourceRefs: unionRefs(testCase.sourceRefs, row.sourceRefs),
+    });
+    if (target.type === 'batch') {
+      const created = newByKey.get(target.key);
+      if (!created) throw new TestDraftGenerationError(`연결할 TC가 만들어지지 않아요. 앞선 후보를 제외했는지 확인해 주세요. (${row.candidate.key})`);
+      Object.assign(created, add(created));
+      continue;
+    }
+    const existing = existingById.get(target.id);
+    // 비교 대상이 지금도 같은 내용의 폐기되지 않은 TC인지 다시 확인한다.
+    const sameContent =
+      !!existing &&
+      existing.status !== 'deprecated' &&
+      testCaseIdentity(existing.category, existing.feature, existing.title, existing.steps, existing.expectedResult) ===
+        testCaseIdentity(row.candidate.perspective, row.candidate.testCase.feature, row.candidate.testCase.title, row.candidate.testCase.steps, row.candidate.testCase.expectedResult);
+    if (!sameContent) throw new StaleTestDraftPreviewError(STALE_TEST_DRAFT_PREVIEW_MESSAGE);
+    linkedExisting.set(target.id, add(linkedExisting.get(target.id) ?? existing));
+  }
+  const updatedTestCases: TestCase[] = [];
+  for (const [id, merged] of linkedExisting) {
+    const original = existingById.get(id)!;
+    const changed = ['requirementIds', 'testConditionIds', 'sourceRefs'].some((field) => JSON.stringify(original[field as 'requirementIds']) !== JSON.stringify(merged[field as 'requirementIds']));
+    if (changed) updatedTestCases.push({ ...merged, revision: original.revision + 1, updatedAt: options.now });
+  }
+
+  // 새 TC도 연결도 없으면(모두 이미 연결됨 · 제외) 아무것도 저장하지 않는다.
+  if (testCases.length === 0 && updatedTestCases.length === 0) throw new TestDraftGenerationError('새로 반영할 TC 초안 또는 연결이 없어요.');
+  const decisions = Object.fromEntries(inputs.map((input) => [input.key, input.decision]));
+  return { testConditions, testCases, updatedTestCases, summary: summarizeTestDraftAnalysis(analysis, decisions), conditionsCreated: testConditions.length, conditionsReused };
 }
+
+const existingConditionId = (context: TestDraftContext, identity: string): string | undefined =>
+  context.testConditions.find((item) => item.projectId === context.project.id && item.status !== 'deprecated' && conditionIdentity(item.requirementIds, item.feature, item.title) === identity)?.id;
 
 /** 활동 기록 · 완료 안내에 쓰는 요약 문구 */
 export const testDraftSummaryText = (plan: Pick<TestDraftPlan, 'summary' | 'conditionsCreated' | 'conditionsReused'>) =>
-  `요구사항 ${plan.summary.requirementCount} · 관점 ${plan.summary.perspectiveCount} · 신규 TC ${plan.summary.created} · 테스트 조건 신규 ${plan.conditionsCreated} · 재사용 ${plan.conditionsReused} · 중복 ${plan.summary.duplicate} · 제외 ${plan.summary.excluded}`;
+  `요구사항 ${plan.summary.requirementCount} · 관점 ${plan.summary.perspectiveCount} · 신규 TC ${plan.summary.created}(별도 신규 ${plan.summary.separate}) · 기존 TC 연결 ${plan.summary.linked} · 테스트 조건 신규 ${plan.conditionsCreated} · 재사용 ${plan.conditionsReused} · 중복 제외 ${plan.summary.duplicateSkipped} · 제외 ${plan.summary.excluded}`;

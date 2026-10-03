@@ -280,6 +280,14 @@ export const requirementImportFieldLabel: Record<RequirementImportField, string>
   needsConfirmation: '확인 필요',
 };
 
+export const testDraftDecisionLabel: Record<'create' | 'link_existing' | 'create_separate' | 'excluded' | 'pending', string> = {
+  create: '새 TC로 만들기',
+  link_existing: '기존 TC와 연결',
+  create_separate: '별도 신규 TC로 만들기',
+  excluded: '제외',
+  pending: '판단 필요',
+};
+
 export const testDraftKindLabel: Record<'create' | 'duplicate' | 'invalid', string> = {
   create: '신규',
   duplicate: '중복',
