@@ -15,6 +15,7 @@ export const activityCategory: Record<ActivityType, ActivityCategory> = {
   changes_applied: 'deliverables',
   test_case_changed: 'testCases',
   test_assets_imported: 'testCases',
+  test_drafts_generated: 'testCases',
   results_uploaded: 'results',
   issue_created: 'issues',
   issue_updated: 'issues',
@@ -65,6 +66,8 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
   changes_applied: { key: 'analysisId', path: (base) => `${base}/test-design` },
   // 요구사항 가져오기. 가져온 요구사항은 요구사항 탭에 모두 있으므로 그 탭으로 간다.
   requirements_imported: { key: 'deliverableId', path: (base) => `${base}/requirements` },
+  // TC 초안 생성. 한 번에 여러 TC를 만들므로 TC 하나를 여는 주소 대신 만든 TC ID 목록을 근거로 테스트 설계 탭까지만 간다.
+  test_drafts_generated: { key: 'generatedTestCaseIds', path: (base) => `${base}/test-design` },
   // 변경 분석 검토 완료. 반영과 같은 분석을 가리키므로 같은 key · 같은 탭이다.
   requirements_analyzed: { key: 'analysisId', path: (base) => `${base}/test-design` },
 };
@@ -76,6 +79,7 @@ const activityLinks: Partial<Record<ActivityType, { key: string; path: (base: st
 const tabLinkLabels: Partial<Record<ActivityType, string>> = {
   changes_applied: '테스트 설계 보기',
   requirements_analyzed: '테스트 설계 보기',
+  test_drafts_generated: '테스트 설계 보기',
 };
 
 export const activityLinkLabel = (activity: Activity): string | undefined => tabLinkLabels[activity.type];

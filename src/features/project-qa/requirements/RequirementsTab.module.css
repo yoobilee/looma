@@ -86,7 +86,7 @@
 
 .requirement {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
+  grid-template-columns: 136px minmax(0, 1fr);
   align-items: start;
   gap: 12px;
   padding: 12px 0;
@@ -188,6 +188,47 @@
 .caption {
   font: var(--text-caption);
   color: var(--color-muted);
+}
+
+.requirementMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pick {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  cursor: pointer;
+}
+
+.targetBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.targetActions {
+  display: inline-flex;
+  gap: 12px;
+}
+
+.linkButton {
+  padding: 0;
+  color: var(--color-sky-strong);
+  font: var(--text-caption);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linkButton:disabled {
+  color: var(--color-muted);
+  text-decoration: none;
+  cursor: default;
 }
 
 .generate {

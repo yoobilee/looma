@@ -10,6 +10,7 @@ import {
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
 import { analyzeRequirementImport, planRequirementImport, requirementImportInputProblems, requirementImportSummaryText, RequirementImportError } from '@/domain/requirementImport';
+import { analyzeTestDraftGeneration, planTestDraftGeneration, testDraftSummaryText } from '@/domain/testDraftGeneration';
 import { importSourceMimeType, toImportSourceSnapshot } from '@/domain/importSource';
 import { applyIssueChanges, buildIssue } from '@/domain/issues';
 import { analyzeTestAssetImport, planTestAssetImport, type ImportTable } from '@/domain/testAssetImport';
@@ -579,10 +580,43 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
       async listByProject(projectId) {
         return copy(db.testCases.filter((item) => item.projectId === projectId));
       },
+      createDraftsFromRequirements: (rawInput) => {
+        const input = copy(rawInput);
+        return mutate((draft) => {
+          const project = draft.projects.find((item) => item.id === input.projectId);
+          if (!project) throw notFound('프로젝트', input.projectId);
+          // 미리보기와 같은 규칙으로 현재 요구사항 · 테스트 조건 · TC 기준 후보와 판정을 다시 계산한다. 먼저 전부 계산하고 검증하며, 여기서 실패하면 아무것도 저장하지 않는다.
+          const context = {
+            project,
+            requirements: draft.requirements.filter((item) => item.projectId === project.id),
+            deliverables: draft.deliverables.filter((item) => item.projectId === project.id),
+            testConditions: draft.testConditions.filter((item) => item.projectId === project.id),
+            testCases: draft.testCases.filter((item) => item.projectId === project.id),
+            templates: draft.templates,
+          };
+          // 순서: 현재 데이터로 분석(양식 확인 포함) → 지문 · 판단 확인 → 계획. 여기서 실패하면 아무것도 쓰지 않는다.
+          const analysis = analyzeTestDraftGeneration(context, { requirementIds: input.requirementIds, perspectives: input.perspectives });
+          const plan = planTestDraftGeneration(context, analysis, input.candidates, { createId, now: nowIso() });
+          draft.testConditions.push(...plan.testConditions);
+          draft.testCases.push(...plan.testCases);
+          for (const updated of plan.updatedTestCases) {
+            const index = draft.testCases.findIndex((item) => item.id === updated.id);
+            draft.testCases[index] = updated;
+          }
+          const title = [plan.testCases.length > 0 && `TC 초안 ${plan.testCases.length}건 생성`, plan.updatedTestCases.length > 0 && `기존 TC ${plan.updatedTestCases.length}건 연결`].filter(Boolean).join(' · ');
+          record(draft, 'test_drafts_generated', title, {
+            projectId: project.id,
+            metadata: { detail: testDraftSummaryText(plan), generatedTestCaseIds: plan.testCases.map((item) => item.id).join(',') },
+          });
+          return { testCases: plan.testCases, updatedTestCases: plan.updatedTestCases, testConditions: plan.testConditions, summary: plan.summary };
+        });
+      },
       updateStatus: (id, status) =>
         mutate((draft) => {
           const testCase = draft.testCases.find((item) => item.id === id);
           if (!testCase) throw notFound('TC', id);
+          // 확인 필요 TC는 확인이 끝났다고 알려 주는 기능이 아직 없으므로 어떤 상태에서도 검토 완료 · 사용 중으로 바꿀 수 없다(화면과 별개로 여기서 막는다).
+          if (testCase.generationType === 'needs_confirmation' && (status === 'reviewed' || status === 'active')) throw new Error('확인 필요 TC는 확인사항이 답변되기 전에는 검토 완료로 표시할 수 없어요.');
           testCase.status = status;
           testCase.updatedAt = nowIso();
           record(draft, 'test_case_changed', `${testCase.externalId ?? testCase.id} 상태 변경`, {

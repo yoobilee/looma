@@ -150,6 +150,7 @@ export type TestCaseGenerationType = SourceType | 'imported_existing';
 export type TestCaseStatus = 'draft' | 'reviewed' | 'active' | 'needs_review' | 'deprecated';
 /** 누가 만들었는가. 근거 유형(generationType)과 별개다. */
 export type TestCaseOrigin = 'manual' | 'ai_generated' | 'ai_modified' | 'imported' | 'import_modified';
+// manual에는 사용자가 요구사항 · 관점을 골라 Looma의 기본 규칙으로 만든 초안(요구사항 기반 TC 초안)도 포함한다. AI가 만든 것은 ai_generated다.
 
 /** 고객사 TC 파일 가져오기 근거. 이 TC를 마지막으로 만들거나 바꾼 가져오기 작업과 파일 행을 가리킨다. */
 export interface TestAssetImportSource {
@@ -464,6 +465,8 @@ export type ActivityType =
   | 'requirements_analyzed'
   /** 요구사항 파일(CSV · XLSX)을 가져옴. 변경 분석 검토 · 반영과는 다른 작업이다. */
   | 'requirements_imported'
+  /** 요구사항에서 TC 초안(테스트 조건 포함)을 여러 건 한 번에 만듦. TC 하나의 상태 변경(test_case_changed)과 다르다. */
+  | 'test_drafts_generated'
   | 'test_case_changed'
   | 'results_uploaded'
   | 'issue_created'

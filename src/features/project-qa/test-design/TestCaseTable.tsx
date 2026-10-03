@@ -63,10 +63,12 @@ function StatusActions({ testCase }: { testCase: TestCase }) {
       )}
       {testCase.status === 'needs_review' && (
         <>
-          <button type="button" className={styles.reviewButton} onClick={markReviewed}>
+          <button type="button" className={styles.reviewButton} disabled={testCase.generationType === 'needs_confirmation'} onClick={markReviewed}>
             다시 검토 완료로 표시
           </button>
-          <p className={styles.blockedNote}>근거 요구사항이 바뀌었어요. 절차와 기대 결과를 다시 확인해 주세요.</p>
+          <p className={styles.blockedNote}>
+            {testCase.generationType === 'needs_confirmation' ? '확인사항이 답변되면 검토할 수 있어요.' : '근거 요구사항이 바뀌었어요. 절차와 기대 결과를 다시 확인해 주세요.'}
+          </p>
         </>
       )}
       {testCase.status === 'active' && <p className={styles.blockedNote}>사용 중인 TC예요. 바꿀 내용은 변경 영향 분석의 수정 제안으로 검토해요.</p>}

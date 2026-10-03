@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Download, FileSpreadsheet, FileText, Sparkles, Upload } from 'lucide-react';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
-import { testPerspectiveLabel } from '@/domain/labels';
-import type { TestCase, TestPerspective } from '@/domain/types';
+import type { TestCase } from '@/domain/types';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { FilterTabs } from '@/components/ui/FilterTabs';
 import { SectionHeader } from '@/components/ui/SectionHeader';
@@ -29,9 +28,7 @@ function matchesFilter(testCase: TestCase, filter: CaseFilter): boolean {
 
 export function TestDesignTab() {
   const { project } = useProjectContext();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
-  const requestedPerspectives = (location.state as { requestedPerspectives?: TestPerspective[] } | null)?.requestedPerspectives;
   const initialSetup: TemplateSetupMode | null =
     searchParams.get('entry') === 'description' ? 'description' : searchParams.get('panel') === 'template' ? 'existing_tc' : null;
   const [setupMode, setSetupMode] = useState<TemplateSetupMode | null>(initialSetup);
@@ -67,17 +64,6 @@ export function TestDesignTab() {
 
   return (
     <div className={styles.page}>
-      {requestedPerspectives && (
-        <div className={styles.notice} role="status">
-          <Sparkles aria-hidden />
-          <p>
-            선택한 관점: <strong>{requestedPerspectives.map((value) => testPerspectiveLabel[value]).join(', ')}</strong>
-            <br />
-            AI 초안 생성은 아직 연결되지 않았어요. 연결되면 이 관점으로 초안을 만들고, 아래 목록처럼 근거와 생성 유형을 붙여 검토 대기 상태로 추가합니다.
-          </p>
-        </div>
-      )}
-
       <section className={styles.templateBar} aria-labelledby="template-title">
         <div className={styles.templateInfo}>
           <h2 id="template-title" className={styles.templateTitle}>
@@ -104,8 +90,8 @@ export function TestDesignTab() {
         <ButtonLink to={`/projects/${project.id}/requirements`} className={styles.entry} variant="ghost">
           <FileText aria-hidden />
           <span>
-            <strong>산출물에서 생성</strong>
-            <small>{hasDeliverables ? '요구사항 분석 → 범위 선택 → 초안 → 검토' : '산출물을 먼저 추가하세요'}</small>
+            <strong>요구사항에서 기본 초안 만들기</strong>
+            <small>{hasDeliverables ? '요구사항 선택 → 관점 선택 → 초안 미리보기 → 검토' : '산출물을 먼저 추가하세요'}</small>
           </span>
         </ButtonLink>
         <button type="button" className={styles.entry} onClick={() => setSetupMode('existing_tc')}>
@@ -143,7 +129,7 @@ export function TestDesignTab() {
         {testCases.length === 0 ? (
           <StateMessage
             title="아직 TC 초안이 없어요."
-            description="위 세 가지 방법 중 하나로 시작하거나 고객사가 쓰던 TC 파일을 가져오세요. AI가 만든 초안은 사람이 검토하기 전까지 확정되지 않아요."
+            description="요구사항에서 선택한 관점으로 기본 TC 초안을 만들거나(AI 초안은 아직 연결되지 않았어요) 고객사가 쓰던 TC 파일을 가져오세요. 만든 초안은 사람이 검토하기 전까지 확정되지 않아요."
           />
         ) : (
           <>

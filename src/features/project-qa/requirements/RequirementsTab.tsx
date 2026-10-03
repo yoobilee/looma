@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { repositories } from '@/data';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
 import { basePerspectives, scopeDrivenPerspectives, testPerspectiveLabel } from '@/domain/labels';
+import { isTestDraftEligible } from '@/domain/testDraftGeneration';
 import type { Requirement, TestPerspective } from '@/domain/types';
 import { Button } from '@/components/ui/Button';
 import { CheckboxGroup } from '@/components/ui/Field';
@@ -12,13 +13,13 @@ import { SourceTypeTag, Tag } from '@/components/ui/Tag';
 import { LoadingState, StateMessage } from '@/components/ui/StateMessage';
 import { useProjectContext } from '../projectContext';
 import { RequirementImportDialog } from './RequirementImportDialog';
+import { TestDraftDialog } from './TestDraftDialog';
 import styles from './RequirementsTab.module.css';
 
 type RequirementFilter = 'all' | 'changes' | 'confirm' | 'removed';
 
 export function RequirementsTab() {
   const { project, openDeliverableCreate } = useProjectContext();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = (searchParams.get('filter') as RequirementFilter | null) ?? 'all';
 
@@ -28,20 +29,31 @@ export function RequirementsTab() {
   ];
   const [perspectives, setPerspectives] = useState<TestPerspective[]>(basePerspectives);
   const [importOpen, setImportOpen] = useState(false);
+  // TC 초안을 만들 요구사항은 보이는 요구사항 전체가 기본 선택이고, 사용자가 해제한 것만 기억한다.
+  const [deselected, setDeselected] = useState<string[]>([]);
+  const [draftOpen, setDraftOpen] = useState(false);
 
   const data = useRepositoryData(
-    async (repos) => ({
-      requirements: await repos.requirements.listByProject(project.id),
-      deliverables: await repos.deliverables.listByProject(project.id),
-      issues: await repos.issues.listByProject(project.id),
-    }),
+    async (repos) => {
+      const currentProject = (await repos.projects.get(project.id)) ?? project;
+      return {
+        requirements: await repos.requirements.listByProject(project.id),
+        deliverables: await repos.deliverables.listByProject(project.id),
+        issues: await repos.issues.listByProject(project.id),
+        testConditions: await repos.testConditions.listByProject(project.id),
+        testCases: await repos.testCases.listByProject(project.id),
+        // 지금 저장된 프로젝트와 그 양식. 새 TC에 붙을 양식이 미리보기 뒤에 바뀌면 미리보기가 달라진 것으로 알 수 있게 항상 최신 값을 쓴다.
+        currentProject,
+        templates: currentProject.tcTemplateId ? [await repos.templates.get(currentProject.tcTemplateId)].filter((item): item is NonNullable<typeof item> => !!item) : [],
+      };
+    },
     [project.id],
   );
 
   if (data.status === 'loading') return <LoadingState />;
   if (data.status === 'error') return <StateMessage tone="error" title="요구사항을 불러오지 못했어요." />;
 
-  const { requirements, deliverables, issues } = data.data;
+  const { requirements, deliverables, issues, testConditions, testCases, templates, currentProject } = data.data;
   // 가져오기 중 목록이 비어 있음 ↔ 있음으로 바뀌어도 대화상자가 다시 만들어지지 않도록 두 화면 모두 같은 자리에 둔다.
   const importDialog = importOpen ? <RequirementImportDialog open projectId={project.id} deliverables={deliverables} requirements={requirements} onClose={() => setImportOpen(false)} /> : null;
   if (requirements.length === 0) {
@@ -83,6 +95,10 @@ export function RequirementsTab() {
   const scope = filter === 'removed' ? removed : current;
   const visible = scope.filter((item) => (filter === 'changes' ? item.lifecycle === 'changed' : filter === 'confirm' ? item.needsConfirmation : true));
   const features = [...new Set(visible.map((item) => item.feature))];
+  // 제거된 요구사항(제거됨 보기)은 TC 초안 대상이 아니다.
+  const eligible = visible.filter((item) => isTestDraftEligible(item, project.id));
+  const targetIds = eligible.filter((item) => !deselected.includes(item.id)).map((item) => item.id);
+  const setTarget = (id: string, selected: boolean) => setDeselected((currentIds) => (selected ? currentIds.filter((item) => item !== id) : [...currentIds.filter((item) => item !== id), id]));
   const confirmItems = current.filter((item) => item.needsConfirmation);
   const alreadyAsked = (item: Requirement) => issues.some((issue) => issue.requirementId === item.id);
 
@@ -149,7 +165,15 @@ export function RequirementsTab() {
                 <ul className={styles.requirements}>
                   {items.map((item) => (
                     <li key={item.id} className={`${styles.requirement} ${item.lifecycle === 'removed' ? styles.removed : ''}`}>
-                      <SourceTypeTag sourceType={item.sourceType} />
+                      <div className={styles.requirementMeta}>
+                        {item.lifecycle !== 'removed' && (
+                          <label className={styles.pick}>
+                            <input type="checkbox" checked={!deselected.includes(item.id)} onChange={(event) => setTarget(item.id, event.target.checked)} />
+                            <span className="visually-hidden">TC 초안 대상: {item.text}</span>
+                          </label>
+                        )}
+                        <SourceTypeTag sourceType={item.sourceType} />
+                      </div>
                       <div>
                         <p className={styles.requirementText}>
                           <span className={styles.requirementBody}>{item.text}</span>
@@ -193,25 +217,47 @@ export function RequirementsTab() {
 
         <section aria-labelledby="scope-title" className={styles.scope}>
           <SectionHeader id="scope-title" title="테스트 범위" />
-          <p className={styles.caption}>이번 설계에 포함할 관점을 선택합니다. API·성능·호환성은 프로젝트 범위에 있을 때만 보여요.</p>
+          <p className={styles.caption}>요구사항 목록에서 초안을 만들 요구사항을 고르고 테스트 관점을 선택합니다. API·성능·호환성은 프로젝트 범위에 있을 때만 보여요. 단서가 없는 관점은 만들지 않고, 기존 TC는 바꾸지 않아요.</p>
           <CheckboxGroup
             legend="테스트 관점"
             options={availablePerspectives.map((value) => ({ value, label: testPerspectiveLabel[value] }))}
             value={perspectives}
             onChange={setPerspectives}
           />
-          <Button
-            variant="primary"
-            className={styles.generate}
-            disabled={perspectives.length === 0}
-            onClick={() => navigate(`/projects/${project.id}/test-design`, { state: { requestedPerspectives: perspectives } })}
-          >
-            선택 범위로 TC 초안 생성
+          <div className={styles.targetBar}>
+            <p className={styles.caption} aria-live="polite">
+              {filter === 'removed' ? '제거된 요구사항으로는 초안을 만들 수 없어요.' : `선택한 요구사항 ${targetIds.length} / ${eligible.length}개`}
+            </p>
+            <span className={styles.targetActions}>
+              <button type="button" className={styles.linkButton} disabled={eligible.length === 0} onClick={() => setDeselected((currentIds) => currentIds.filter((id) => !eligible.some((item) => item.id === id)))}>
+                모두 선택
+              </button>
+              <button type="button" className={styles.linkButton} disabled={eligible.length === 0} onClick={() => setDeselected((currentIds) => [...new Set([...currentIds, ...eligible.map((item) => item.id)])])}>
+                모두 해제
+              </button>
+            </span>
+          </div>
+          <Button variant="primary" className={styles.generate} disabled={perspectives.length === 0 || targetIds.length === 0} onClick={() => setDraftOpen(true)}>
+            선택 요구사항으로 TC 초안 만들기
           </Button>
         </section>
       </aside>
     </div>
     {importDialog}
+    {draftOpen && (
+      <TestDraftDialog
+        open
+        project={currentProject}
+        requirements={requirements}
+        deliverables={deliverables}
+        testConditions={testConditions}
+        testCases={testCases}
+        templates={templates}
+        requirementIds={targetIds}
+        perspectives={perspectives}
+        onClose={() => setDraftOpen(false)}
+      />
+    )}
     </>
   );
 }
