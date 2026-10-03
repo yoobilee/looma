@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useRepositoryData } from '@/hooks/useRepositoryData';
-import { activityCategoryFilters, activityCategoryLabel, activityLinkPath, matchesActivityCategory, parseActivityCategoryFilter } from '@/domain/activityRecords';
+import { activityCategoryFilters, activityCategoryLabel, activityLinkLabel, activityLinkPath, matchesActivityCategory, parseActivityCategoryFilter } from '@/domain/activityRecords';
 import type { Activity } from '@/domain/types';
 import { Button } from '@/components/ui/Button';
 import { FilterTabs } from '@/components/ui/FilterTabs';
@@ -66,7 +66,7 @@ function RecordList({ activities, projectId }: { activities: Activity[]; project
   const shown = activities.slice(0, limit);
   return (
     <>
-      <GroupedActivityList activities={shown} within="newest" linkOf={(activity) => activityLinkPath(activity, projectId)} />
+      <GroupedActivityList activities={shown} within="newest" linkOf={(activity) => activityLinkPath(activity, projectId)} linkLabelOf={activityLinkLabel} />
       {activities.length > limit && (
         <div className={styles.more}>
           <Button variant="ghost" size="sm" onClick={() => setLimit((current) => current + PAGE_SIZE)}>

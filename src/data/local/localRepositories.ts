@@ -438,7 +438,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           }
           const deliverable = { id: createId('dlv'), importedAt: nowIso(), ...input };
           draft.deliverables.push(deliverable);
-          record(draft, 'deliverable_added', `${deliverable.title} 추가`, { projectId: input.projectId, metadata: { detail: input.type.toUpperCase() } });
+          record(draft, 'deliverable_added', `${deliverable.title} 추가`, { projectId: input.projectId, metadata: { detail: input.type.toUpperCase(), deliverableId: deliverable.id } });
           return deliverable;
         });
       },
@@ -531,6 +531,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             projectId: analysis.projectId,
             metadata: {
               detail: `요구사항 ${summary.requirementsAdded + summary.requirementsModified + summary.requirementsRemoved} · TC ${summary.testCasesCreated + summary.testCasesModified + summary.testCasesDeprecated}`,
+              analysisId: analysis.id,
             },
           });
           return analysis;
@@ -555,7 +556,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           testCase.updatedAt = nowIso();
           record(draft, 'test_case_changed', `${testCase.externalId ?? testCase.id} 상태 변경`, {
             projectId: testCase.projectId,
-            metadata: { detail: status === 'draft' ? '초안으로 되돌림' : testCaseStatusLabel[status] },
+            metadata: { detail: status === 'draft' ? '초안으로 되돌림' : testCaseStatusLabel[status], testCaseId: testCase.id },
           });
           return testCase;
         }),
@@ -592,7 +593,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           draft.testAssetImports.push(session);
           record(draft, 'test_assets_imported', `TC 자산 ${session.created + session.updated}건 가져오기`, {
             projectId: input.projectId,
-            metadata: { detail: `${session.fileName} · 신규 ${session.created} · 업데이트 ${session.updated} · 변경 없음 ${session.unchanged} · 제외 ${session.excluded}` },
+            metadata: { detail: `${session.fileName} · 신규 ${session.created} · 업데이트 ${session.updated} · 변경 없음 ${session.unchanged} · 제외 ${session.excluded}`, testAssetImportId: session.id },
           });
           return session;
         });
@@ -637,7 +638,7 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
           const { round, executionType } = resultImport;
           record(draft, 'results_uploaded', `${round}차 ${executionTypeLabel[executionType ?? 'full']} 결과 가져오기`, {
             projectId: input.projectId,
-            metadata: { detail: resultImportSummaryText(summarizeResultImport(plan.results)) },
+            metadata: { detail: resultImportSummaryText(summarizeResultImport(plan.results)), resultImportId: resultImport.id },
           });
           return resultImport;
         });

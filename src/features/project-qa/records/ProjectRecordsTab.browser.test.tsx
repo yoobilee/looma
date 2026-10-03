@@ -11,6 +11,7 @@ import { createMemoryStateStore } from '@/data/local/stateStore';
 import { createSeed, PROJECT_A, PROJECT_B } from '@/data/mock/seed';
 import type { Repositories } from '@/data/repositories/types';
 import type { Activity } from '@/domain/types';
+import { TestDesignTab } from '../test-design/TestDesignTab';
 import { ProjectRecordsTab } from './ProjectRecordsTab';
 
 /*
@@ -36,17 +37,21 @@ async function unmount() {
 }
 
 /** 주어진 활동만 가진 예시 데이터로 탭을 띄운다. */
-async function mount(activities: Activity[], search = '') {
+async function mount(activities: Activity[], search = '', change: (data: AppData) => void = () => {}) {
   await unmount();
   const repos = createLocalRepositories({
     openStore: async () => createMemoryStateStore(),
-    createInitialData: (): AppData => ({ ...createSeed(), activities }),
+    createInitialData: (): AppData => {
+      const data = { ...createSeed(), activities };
+      change(data);
+      return data;
+    },
   });
   await repos.persistence.load();
   holder.repos = repos;
   const project = (await repos.projects.get(PROJECT_A))!;
   history.replaceState(null, '', `${location.pathname}${search}`);
-  router = createBrowserRouter([{ element: <Outlet context={{ project, openDeliverableCreate: () => {} }} />, children: [{ path: '*', element: <ProjectRecordsTab /> }] }]);
+  router = createBrowserRouter([{ element: <Outlet context={{ project, openDeliverableCreate: () => {} }} />, children: [{ path: `/projects/${PROJECT_A}/test-design`, element: <TestDesignTab /> }, { path: '*', element: <ProjectRecordsTab /> }] }]);
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -135,9 +140,63 @@ describe('프로젝트 기록 탭', () => {
     await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_A}/issues?issue=issue-bug-014`);
   });
 
-  it('390px에서 가로로 넘치지 않는다', async () => {
+  // 원본 ID가 남은 기록. 개별 주소가 없는 화면(가져오기 이력 · 산출물 · 변경 분석)은 탭까지만 간다.
+  const linked = [
+    activity('결과-링크', '2026-10-02T09:00:00.000Z', { type: 'results_uploaded', metadata: { detail: 'PASS 3', resultImportId: 'imp-a-2' } }),
+    activity('TC-링크', '2026-10-02T10:00:00.000Z', { type: 'test_case_changed', metadata: { detail: '검토 완료', testCaseId: 'tc-002' } }),
+    activity('TC자산-링크', '2026-10-02T11:00:00.000Z', { type: 'test_assets_imported', metadata: { detail: 'a.csv', testAssetImportId: 'tai-1' } }),
+    activity('산출물-링크', '2026-10-02T12:00:00.000Z', { metadata: { detail: 'PDF', deliverableId: 'dlv-1' } }),
+    activity('반영-링크', '2026-10-02T13:00:00.000Z', { type: 'changes_applied', metadata: { detail: '요구사항 1 · TC 2', analysisId: 'cia-plan-v15' } }),
+    activity('결과-옛기록', '2026-10-02T14:00:00.000Z', { type: 'results_uploaded', metadata: { detail: 'PASS 3' } }),
+    activity('TC-엉뚱한key', '2026-10-02T15:00:00.000Z', { type: 'test_case_changed', metadata: { detail: '검토 완료', issueId: 'issue-bug-014' } }),
+  ];
+
+  it.each([
+    ['결과-링크', `/projects/${PROJECT_A}/results?import=imp-a-2`],
+    ['TC-링크', `/projects/${PROJECT_A}/test-design?tc=tc-002`],
+    ['TC자산-링크', `/projects/${PROJECT_A}/import-history`],
+    ['산출물-링크', `/projects/${PROJECT_A}`],
+    ['이슈-링크', `/projects/${PROJECT_A}/issues?issue=issue-bug-014`],
+  ])('%s를 누르면 %s로 이동한다', async (title, path) => {
+    await mount([...base, ...linked]);
+    await userEvent.click(page.getByRole('link', { name: title }));
+    await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(path);
+  });
+
+  it('원본 ID가 없는 옛 기록 · 종류에 맞지 않는 key만 있는 기록은 텍스트로 남고, 필터 · 최신순은 그대로다', async () => {
+    const view = await mount([...base, ...linked]);
+    const linkTitles = [...view.querySelectorAll('a')].map((link) => link.textContent);
+    expect(linkTitles).toEqual(['테스트 설계 보기', '산출물-링크', 'TC자산-링크', 'TC-링크', '결과-링크', '이슈-링크']);
+    for (const title of ['결과-옛기록', 'TC-엉뚱한key', '이슈-옛기록', '산출물-늦은']) expect(titles(view)).toContain(title);
+    await userEvent.click(filterButton('TC'));
+    await expect.poll(() => titles(view)).toEqual(['TC-엉뚱한key', 'TC자산-링크', 'TC-링크']);
+    expect([...view.querySelectorAll('a')].map((link) => link.textContent)).toEqual(['TC자산-링크', 'TC-링크']);
+  });
+
+  it('변경사항 반영 기록은 제목이 평문이고, 현재 테스트 설계로 가는 별도 링크는 이후 분석이 생기면 최신 분석을 연다', async () => {
+    const past = activity('v1.5 변경사항 반영', '2026-10-02T09:00:00.000Z', { type: 'changes_applied', metadata: { detail: '요구사항 1 · TC 2', analysisId: 'cia-plan-v15' } });
+    const view = await mount([past], '', (data) => {
+      // 과거 분석 A(v1.5)는 반영을 마쳤고, 이후 더 최신 분석 B(v99)가 생겼다.
+      const analysisA = data.changeAnalyses.find((item) => item.id === 'cia-plan-v15')!;
+      analysisA.status = 'applied';
+      data.deliverables.push({ id: 'dlv-v99', projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v99.pdf', importedAt: '2026-10-03T00:00:00.000Z' });
+      data.changeAnalyses.push({ ...structuredClone(analysisA), id: 'cia-plan-v99', targetDeliverableId: 'dlv-v99', baselineDeliverableId: undefined, status: 'draft', createdAt: '2026-10-03T00:00:00.000Z' });
+    });
+    // 제목은 링크가 아니고, 이동 문구는 대상이 현재 테스트 설계 화면임을 알린다.
+    expect(page.getByRole('link', { name: 'v1.5 변경사항 반영' }).elements()).toHaveLength(0);
+    expect(titles(view)).toEqual(['v1.5 변경사항 반영']);
+    const action = page.getByRole('link', { name: '테스트 설계 보기' });
+    expect(action.element().getAttribute('href')).toBe(`/projects/${PROJECT_A}/test-design`);
+    await userEvent.click(action);
+    await expect.poll(() => router!.state.location.pathname + router!.state.location.search).toBe(`/projects/${PROJECT_A}/test-design`);
+    await expect.poll(() => view.textContent).toContain('모바일_개편_기획_v99.pdf');
+  });
+
+  it('390px에서 가로로 넘치지 않는다(긴 링크 제목 포함)', async () => {
     await page.viewport(390, 844);
-    await mount([...base, activity('아주 긴 제목 '.repeat(12), '2026-10-01T13:00:00.000Z')]);
+    const longLinked = activity('아주긴링크제목'.repeat(20), '2026-10-01T14:00:00.000Z', { type: 'results_uploaded', metadata: { resultImportId: 'imp-a-2' } });
+    const view = await mount([...base, ...linked, longLinked, activity('아주 긴 제목 '.repeat(12), '2026-10-01T13:00:00.000Z')]);
+    expect(view.querySelectorAll('a').length).toBeGreaterThan(0);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
   });
 });
