@@ -518,15 +518,15 @@ describe('요구사항 기반 TC 초안: 오탐 방지 · 양식', () => {
     const { view } = await mount({
       change: (data) => {
         const base = { projectId: PROJECT_A, feature: '관리자', sourceRefs: [{ deliverableId: 'dlv-plan-pdf', locator: 'p.41' }], sourceType: 'source_explicit' as const, needsConfirmation: false, lifecycle: 'active' as const, status: 'draft' as const };
-        data.requirements.push({ ...base, id: 'req-admin-logo', text: '관리자 페이지에 로고를 표시한다.' }, { ...base, id: 'req-admin-only', text: '관리자만 접근할 수 있다.' });
+        data.requirements.push({ ...base, id: 'req-admin-logo', text: '관리자 페이지에는 로고만 노출한다.' }, { ...base, id: 'req-admin-only', text: '관리자만 접근할 수 있다.' });
       },
     });
-    await choose(view, { 관리자: ['관리자 페이지에 로고를 표시한다.', '관리자만 접근할 수 있다.'] }, ['권한']);
+    await choose(view, { 관리자: ['관리자 페이지에는 로고만 노출한다.', '관리자만 접근할 수 있다.'] }, ['권한']);
     await userEvent.click(startButton());
     await expect.poll(() => counts('대상 요구사항', '생성 후보')).toEqual(['2', '1']);
     expect(previewRows()).toHaveLength(1);
     expect(previewRows()[0].textContent).toContain('관리자만 접근할 수 있다');
-    expect(dialog()!.querySelector('details')!.textContent).toContain('관리자 페이지에 로고를 표시한다.');
+    expect(dialog()!.querySelector('details')!.textContent).toContain('관리자 페이지에는 로고만 노출한다.');
     expect(dialog()!.querySelector('details')!.textContent).toContain('권한 단서가 없어 만들지 않았어요');
   });
 

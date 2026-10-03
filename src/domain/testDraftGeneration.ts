@@ -115,28 +115,44 @@ const sentence = (requirement: Requirement) => clean(requirement.text).replace(/
  */
 type Clue = RegExp | ((text: string) => boolean);
 
-// 권한: "권한"이나 "접근 제어"를 직접 말했거나, 권한 주체(관리자 · 비로그인 사용자 등)와 접근 · 허용 · 제한 표현이 함께 있어야 한다.
-// "관리자 페이지에 로고를 표시한다"처럼 주체 이름만 있는 문장은 접근 제어 요구사항이 아니다.
-const permissionDirect = /권한|접근\s*제어/;
-const permissionSubject = /관리자|운영자|역할|비로그인|비회원|로그인하지\s*않은|로그인한\s*사용자|\badmin\b/i;
-const permissionPredicate =
-  /접근\s*(?:가능|불가|제한|할\s*수|이\s*(?:허용|차단|제한))|허용|제한|(?:사용|이용|수정|열람|조회|삭제)할\s*수|만\s*(?:[가-힣A-Za-z]+\s*){0,2}(?:가능|노출|사용|수정|조회|열람|삭제|이용)/;
+// 권한 · API 단서는 낱말이 문장 어딘가에 있는지(문장 전체 AND)가 아니라 낱말 사이의 관계로 본다.
+// 문장 전체에서 따로 찾으면 "관리자 페이지에는 로고만 노출한다"의 관리자(화면 이름)와 로고만(대상 한정),
+// "서버 관리자의 휴가 요청에 응답"의 서버(관리자를 꾸미는 말)와 휴가 요청 · 응답처럼 서로 관계없는 낱말이 우연히 조건을 채운다.
+// 그래서 주체 바로 뒤에 조사가 붙고(화면 · 페이지 같은 명사가 이어지면 주체가 아니다) 같은 구절 안에 그 주체의 동작이 이어질 때만 단서로 본다.
+// 애매하면 만들지 않는다(정확도 우선). 놓친 조합은 미리보기에 이유와 함께 보인다.
 
-// API: API · HTTP · 상태 코드처럼 기술 용어가 있거나, 서버 · 클라이언트 · 네트워크 · 통신 같은 기술 맥락에서 요청과 응답이 함께 적혀야 한다.
-// "사용자 요청에 응답한다"처럼 일반적인 한국어 요청 · 응답은 통신이 아니다.
-const apiTechnical = /\bapi\b|엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|상태\s*코드|서버\s*응답|request.{0,30}response/i;
-const apiContext = /서버|클라이언트|네트워크|통신/;
-const requestAndResponse = /요청.{0,20}응답|응답.{0,20}요청/;
+/** 쉼표 · 마침표 등으로 끊기지 않는 같은 구절 안의 짧은 간격 */
+const SAME_CLAUSE = '[^,.;:!?·\\n]{0,24}?';
+
+/** 권한을 직접 말하는 표현(단독으로 강한 단서): 권한이 있다/없다 · 권한 필요 · 접근 권한 · 권한에 따라 · 권한별 · 권한 제한 · 접근 제어 */
+const permissionExplicit = /접근\s*권한|권한\s*[이을가]?\s*(?:있|없|필요)|권한에\s*따라|권한별|권한\s*제한|접근\s*제어/;
+
+/** 권한 주체. 바로 뒤에 조사가 붙어야 주체다("관리자 페이지"의 관리자는 화면 이름이라 주체가 아니다). */
+const ROLE = '(?:관리자|운영자|비회원|비로그인(?:\\s*사용자)?|로그인하지\\s*않은\\s*사용자|로그인한\\s*사용자)(?:\\s*역할)?';
+/** 권한으로 제한되는 동작 */
+const ACTION = '(?:접근|사용|이용|수정|조회|열람|삭제|등록|노출|진입|다운로드|업로드|변경|구매|주문|작성|승인)';
+/** "주체만 · 주체에게만 · 주체 역할에만 + 같은 구절의 동작": 그 주체에게만 허용한다 */
+const permissionOnly = new RegExp(`${ROLE}(?:만|에만|에게만)\\s${SAME_CLAUSE}${ACTION}`);
+/** "주체는 · 주체에게는 · 주체가 + 같은 구절의 동작 + 할 수 없다/불가/하지 않는다": 그 주체에게 막는다 */
+const permissionDenied = new RegExp(`${ROLE}(?:은|는|에게는|이|가)\\s${SAME_CLAUSE}${ACTION}\\S{0,4}\\s*(?:할\\s*수\\s*없|불가|하지\\s*(?:않|못)|되지\\s*않|(?:이|가)?\\s*제한)`);
+
+/** API를 직접 말하는 기술 용어(단독으로 강한 단서) */
+const apiExplicit = /\bapi\b|엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|상태\s*코드|request.{0,30}response/i;
+/**
+ * 통신 주체와 요청 · 응답 · 호출이 바로 이어지는 관계: "서버에 요청" · "서버로 요청" · "서버 요청" · "서버 응답" · "네트워크 요청" · "서버를 호출" 등.
+ * "서버 관리자" · "서버 이름"처럼 서버가 다른 명사를 꾸미면 통신이 아니다.
+ */
+const apiCommunication = /(?:서버|클라이언트|네트워크)(?:에|로|으로|에게|에서|와|과|가|를)?\s*(?:요청|응답|호출|통신)/;
 
 const clues: Partial<Record<TestPerspective, Clue>> = {
   // 숫자만으로는 부족하다(연도 · 버전 · 번호). 한계를 뜻하는 말이 있거나 숫자 바로 뒤에 이상 · 이하 · 초과 · 미만 · 이내가 와야 한다.
   boundary: /최소|최대|\d[\d,.]*\s*[가-힣A-Za-z%]{0,3}\s*(?:이상|이하|초과|미만|이내)|길이|자리|범위|\d+\s*개\s*까지|\d+\s*[~∼]\s*\d+/,
-  permission: (text) => permissionDirect.test(text) || (permissionSubject.test(text) && permissionPredicate.test(text)),
+  permission: (text) => permissionExplicit.test(text) || permissionOnly.test(text) || permissionDenied.test(text),
   // "변경" · "종료"처럼 일반적인 말은 뺐다. 상태가 이어지거나 바뀌는 것을 뜻하는 표현만 쓴다.
   state_change: /유지|전환|재실행|재시작|재접속|재진입|복원|만료|상태\s*(?:변화|변경)|상태가\s*바뀌|종료\s*(?:후|했다가|한\s*뒤)/,
   // "입력" · "수정" · "보냄"은 뺐다. 데이터를 저장 · 조회 · 주고받는 것을 뜻하는 표현만 쓴다.
   data_io: /저장|조회|불러오|업로드|다운로드|내보내기|가져오기|등록|삭제|전송|데이터|반영되/,
-  api: (text) => apiTechnical.test(text) || (apiContext.test(text) && requestAndResponse.test(text)),
+  api: (text) => apiExplicit.test(text) || apiCommunication.test(text),
   // 숫자만으로는 부족하다. 성능 · 시간 · 처리량을 뜻하는 표현이 있어야 한다.
   performance: /성능|지연|latency|throughput|\btps\b|동시\s*(?:사용자|접속)|\d+\s*(?:ms|밀리초|초)\s*(?:이내|이하|안에|미만)|(?:응답|처리|로딩)\s*시간/i,
 };
@@ -204,7 +220,7 @@ function draftFor(perspective: TestPerspective, requirement: Requirement, projec
         expected: expect('데이터가 요구사항대로 처리된다.'),
       };
     case 'api':
-      return { ...base, steps: ['요구사항과 관련된 API 요청을 보낸다.', '응답을 확인한다.'], expected: expect('API가 요구사항대로 응답한다.') };
+      return { ...base, steps: ['요구사항에 적힌 요청을 보낸다.', '응답이 요구사항대로인지 확인한다.'], expected: expect('요청에 요구사항대로 응답한다.') };
     case 'performance':
       return { ...base, steps: ['요구사항에 적힌 성능 기준을 확인한다.', '같은 조건에서 동작을 수행하며 측정한다.', '측정 결과를 요구사항 기준과 비교한다.'], expected: expect('성능이 요구사항 기준을 만족한다.') };
     case 'compatibility': {
