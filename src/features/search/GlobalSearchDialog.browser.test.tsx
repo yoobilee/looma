@@ -35,6 +35,8 @@ const activities: Activity[] = [
   activity('검색확인 최신 기록', '2026-10-01T09:00:00.000Z', { type: 'test_case_changed', metadata: { detail: '검토 완료', testCaseId: 'tc-002' } }),
   activity('검색확인 개인 기록', '2026-09-15T09:00:00.000Z', { projectId: undefined, type: 'task_completed', metadata: { detail: '업무 완료' } }),
   activity('검색확인 옛 변경 분석', '2026-09-20T09:00:00.000Z', { type: 'requirements_analyzed', metadata: { detail: '기능 3 · 확인 필요 4' } }),
+  activity('검색확인 산출물 추가', '2026-09-26T09:00:00.000Z', { metadata: { detail: 'PDF', deliverableId: 'dlv-plan-pdf-v15' } }),
+  activity('검색확인 TC 가져오기', '2026-09-27T09:00:00.000Z', { type: 'test_assets_imported', metadata: { detail: 'a.csv', testAssetImportId: 'tai-9' } }),
   activity('변경 분석 검토 완료', '2026-09-25T09:00:00.000Z', { type: 'requirements_analyzed', metadata: { detail: '요구사항 변경 3건 · TC 영향 6건', analysisId: 'cia-plan-v15' } }),
 ];
 
@@ -93,11 +95,28 @@ describe('전역 검색: 기록', () => {
     await mount();
     expect(page.getByRole('searchbox', { name: '검색어' }).element().getAttribute('placeholder')).toBe('업무, 프로젝트, TC, 기록, 용어, 임시 자료 검색');
     await search('검색확인');
-    await expect.poll(() => recordItems().length).toBe(4);
-    expect(recordItems().map((item) => item.querySelector('span')?.textContent)).toEqual(['검색확인 최신 기록', '검색확인 옛 변경 분석', '검색확인 개인 기록', '검색확인 오래된 기록']);
+    await expect.poll(() => recordItems().length).toBe(5);
+    expect(recordItems().map((item) => item.querySelector('span')?.textContent)).toEqual(['검색확인 최신 기록', '검색확인 TC 가져오기', '검색확인 산출물 추가', '검색확인 옛 변경 분석', '검색확인 개인 기록']);
     const projectName = (await holder.repos!.projects.get(PROJECT_A))!.name;
     expect(recordItems()[0].textContent).toContain(`${projectName} · 검토 완료`);
-    expect(recordItems()[2].textContent).toContain('개인 · 업무 완료');
+    expect(recordItems()[4].textContent).toContain('개인 · 업무 완료');
+  });
+
+  it('산출물 추가 · TC 가져오기 기록은 정확한 항목으로 이동한다', async () => {
+    await mount();
+    await search('검색확인 산출물');
+    await expect.poll(() => recordItems().length).toBe(1);
+    expect(recordItems()[0].getAttribute('href')).toBe(`/projects/${PROJECT_A}?deliverable=dlv-plan-pdf-v15`);
+    await userEvent.click(recordItems()[0]);
+    await expect.poll(() => pathname()).toBe(`/projects/${PROJECT_A}?deliverable=dlv-plan-pdf-v15`);
+    await expect.poll(() => dialog()?.open).toBe(false);
+
+    await act(async () => router!.navigate('/start'));
+    await userEvent.click(page.getByRole('button', { name: '검색 열기' }));
+    await expect.poll(() => dialog()?.open).toBe(true);
+    await search('검색확인 TC 가져오기');
+    await expect.poll(() => recordItems().length).toBe(1);
+    expect(recordItems()[0].getAttribute('href')).toBe(`/projects/${PROJECT_A}/import-history?assetImport=tai-9`);
   });
 
   it('결과를 누르면 원본 위치로 이동하고 대화상자가 닫히며 검색어도 비워진다', async () => {

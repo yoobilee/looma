@@ -78,8 +78,8 @@ describe('전역 검색: 기록 결과의 이동 위치', () => {
     ['issue_resolved', { issueId: 'issue-a' }, `${base}/issues?issue=issue-a`],
     ['results_uploaded', { resultImportId: 'imp-a' }, `${base}/results?import=imp-a`],
     ['test_case_changed', { testCaseId: 'tc-a' }, `${base}/test-design?tc=tc-a`],
-    ['test_assets_imported', { testAssetImportId: 'tai-a' }, `${base}/import-history`],
-    ['deliverable_added', { deliverableId: 'dlv-a' }, base],
+    ['test_assets_imported', { testAssetImportId: 'tai-a' }, `${base}/import-history?assetImport=tai-a`],
+    ['deliverable_added', { deliverableId: 'dlv-a' }, `${base}?deliverable=dlv-a`],
     ['requirements_analyzed', { analysisId: 'cia-a' }, `${base}/test-design`],
     ['changes_applied', { analysisId: 'cia-a' }, `${base}/test-design`],
   ] as [ActivityType, Record<string, string>, string][])('%s는 기존 원본 링크 정책을 따른다 → %s', (type, metadata, to) => {

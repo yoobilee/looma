@@ -99,7 +99,7 @@ const cases: Case[] = [
     key: 'testAssetImportId',
     run: async (repos) => (await importTestAssets(repos)).id,
     detail: '고객사A_기존TC.csv · 신규 1 · 업데이트 0 · 변경 없음 0 · 제외 0',
-    path: () => `/projects/${PROJECT_A}/import-history`,
+    path: (id) => `/projects/${PROJECT_A}/import-history?assetImport=${id}`,
   },
   {
     name: '산출물 추가',
@@ -107,7 +107,7 @@ const cases: Case[] = [
     key: 'deliverableId',
     run: async (repos) => (await repos.deliverables.create({ projectId: PROJECT_A, type: 'pdf', title: '기획서' })).id,
     detail: 'PDF',
-    path: () => `/projects/${PROJECT_A}`,
+    path: (id) => `/projects/${PROJECT_A}?deliverable=${id}`,
   },
   {
     name: '변경사항 반영',
