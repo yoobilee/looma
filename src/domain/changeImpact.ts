@@ -28,6 +28,14 @@ export function summarizeChangeAnalysis(analysis: ChangeAnalysis): ChangeAnalysi
   return { requirements, testImpacts };
 }
 
+/** 검토 완료 기록의 요약. 판단 대상(유지 · keep을 뺀 요구사항 변경과 TC 영향) 수다. */
+export function changeReviewSummaryText(analysis: ChangeAnalysis): string {
+  const { requirements, testImpacts } = summarizeChangeAnalysis(analysis);
+  const requirementChanges = requirements.added + requirements.modified + requirements.removed;
+  const impacts = testImpacts.create + testImpacts.modify + testImpacts.deprecate + testImpacts.duplicate_candidate;
+  return `요구사항 변경 ${requirementChanges}건 · TC 영향 ${impacts}건`;
+}
+
 /* ---------- 검토 ---------- */
 
 /** unchanged는 참고용이라 판단하지 않는다. */

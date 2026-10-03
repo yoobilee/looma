@@ -43,15 +43,17 @@ describe('활동 원본 링크', () => {
     ['test_assets_imported', 'testAssetImportId', '/projects/proj-1/import-history'],
     ['deliverable_added', 'deliverableId', '/projects/proj-1'],
     ['changes_applied', 'analysisId', '/projects/proj-1/test-design'],
+    ['requirements_analyzed', 'analysisId', '/projects/proj-1/test-design'],
   ] as [ActivityType, string, string][])('%s + %s → %s, ID가 없는 이전 기록은 링크가 없다', (type, key, path) => {
     expect(linkOf(type, { [key]: 'id 1' })).toBe(path);
     expect(linkOf(type, {})).toBeUndefined();
     expect(linkOf(type, { [key]: '' })).toBeUndefined();
   });
 
-  it('개별 원본이 아닌 화면으로만 가는 변경사항 반영만 별도 링크 문구를 쓰고, 나머지는 제목 링크다', () => {
+  it('개별 원본이 아닌 화면으로만 가는 변경 분석 기록(반영 · 검토 완료)만 별도 링크 문구를 쓰고, 나머지는 제목 링크다', () => {
     const labelOf = (type: ActivityType) => activityLinkLabel(make('a', at, { type }));
     expect(labelOf('changes_applied')).toBe('테스트 설계 보기');
+    expect(labelOf('requirements_analyzed')).toBe('테스트 설계 보기');
     for (const type of ['issue_created', 'results_uploaded', 'test_case_changed', 'test_assets_imported', 'deliverable_added'] as const) expect(labelOf(type)).toBeUndefined();
   });
 
@@ -59,12 +61,13 @@ describe('활동 원본 링크', () => {
     expect(linkOf('results_uploaded', { issueId: 'x', testCaseId: 'y' })).toBeUndefined();
     expect(linkOf('issue_created', { resultImportId: 'x' })).toBeUndefined();
     expect(linkOf('test_case_changed', { analysisId: 'x' })).toBeUndefined();
+    expect(linkOf('requirements_analyzed', { deliverableId: 'x', testCaseId: 'y' })).toBeUndefined();
   });
 
   it('링크를 정하지 않은 종류는 metadata가 있어도 링크가 없다', () => {
     const unlinked = (Object.keys(activityTypeLabel) as ActivityType[]).filter((type) => !['issues', 'results', 'testCases', 'deliverables'].includes(activityCategory[type]));
     expect(unlinked.length).toBeGreaterThan(0);
-    for (const type of [...unlinked, 'requirements_analyzed' as const]) {
+    for (const type of unlinked) {
       expect(linkOf(type, { issueId: 'x', resultImportId: 'x', testCaseId: 'x', testAssetImportId: 'x', deliverableId: 'x', analysisId: 'x' })).toBeUndefined();
     }
   });
@@ -72,6 +75,7 @@ describe('활동 원본 링크', () => {
   it('다른 프로젝트 · 프로젝트 없는 활동은 지금 프로젝트로 연결하지 않는다', () => {
     expect(linkOf('issue_created', { issueId: 'x' }, 'proj-2')).toBeUndefined();
     expect(linkOf('issue_created', { issueId: 'x' }, null)).toBeUndefined();
+    expect(linkOf('requirements_analyzed', { analysisId: 'x' }, 'proj-2')).toBeUndefined();
   });
 });
 
