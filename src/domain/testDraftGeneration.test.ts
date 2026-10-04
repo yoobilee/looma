@@ -779,3 +779,70 @@ describe('저장 계획', () => {
     expect(analysis).toEqual(analysisBefore);
   });
 });
+
+describe('확인 필요는 생산자가 아니라 연결 요구사항 기준이다(분석 경계)', () => {
+  /** 외부 생산자(AI 등)가 보낸 후보. 근거 유형은 생산자가 정한 값이다. */
+  const external = (requirementIds: string[], generationType: TestDraftCandidate['generationType']): TestDraftCandidate => ({
+    ...baseCandidate(),
+    key: testDraftCandidateKey('normal_flow', requirementIds),
+    requirementIds,
+    generationType,
+  });
+  const analyze = (ctx: TestDraftContext, ...candidates: TestDraftCandidate[]) => analyzeTestDraftCandidates(ctx, candidates, [], { requirementCount: 1, perspectiveCount: 1 });
+
+  it.each([
+    ['확인 필요 표시 + 생산자 source_explicit', requirement({ needsConfirmation: true }), 'source_explicit'],
+    ['근거 유형 needs_confirmation + 생산자 source_explicit', requirement({ sourceType: 'needs_confirmation' }), 'source_explicit'],
+    ['확인 필요 표시 + 생산자 ai_suggestion', requirement({ needsConfirmation: true }), 'ai_suggestion'],
+  ] as const)('%s → 확인 필요로 올리고 기대 결과에 확인 필요를 붙인다', (_, req, producerType) => {
+    const input = external(['req-x'], producerType);
+    const inputBefore = structuredClone(input);
+    const [row] = analyze(withRequirements(req), input).rows;
+    expect(row).toMatchObject({ kind: 'create', needsConfirmation: true, candidate: { generationType: 'needs_confirmation' } });
+    expect(row.candidate.testCase.expectedResult).toBe(`확인 필요 — ${input.testCase.expectedResult}`);
+    expect(input).toEqual(inputBefore);
+  });
+
+  it('여러 요구사항 중 하나만 확인 필요여도 후보는 확인 필요다', () => {
+    const ctx = withRequirements(requirement({ id: 'a' }), requirement({ id: 'b', needsConfirmation: true }), requirement({ id: 'c', sourceType: 'ai_suggestion' }));
+    const [row] = analyze(ctx, external(['a', 'b', 'c'], 'source_explicit')).rows;
+    expect(row).toMatchObject({ needsConfirmation: true, candidate: { generationType: 'needs_confirmation', requirementIds: ['a', 'b', 'c'] } });
+  });
+
+  it('생산자가 더 조심스럽게 보낸 값은 낮추지 않고, 요구사항이 AI 제안이면 source_explicit을 AI 제안으로 올린다', () => {
+    const ctx = withRequirements(requirement({ id: 'plain' }), requirement({ id: 'suggested', sourceType: 'ai_suggestion' }));
+    const rows = analyze(ctx, external(['plain'], 'needs_confirmation'), external(['suggested'], 'source_explicit')).rows;
+    expect(rows.map((row) => [row.candidate.generationType, row.needsConfirmation])).toEqual([
+      ['needs_confirmation', true],
+      ['ai_suggestion', false],
+    ]);
+    // 확인 필요가 아닌 요구사항에서 생산자가 확인 필요로 보낸 후보는 기대 결과를 바꾸지 않는다(생산자 문구 그대로).
+    expect(rows[0].candidate.testCase.expectedResult).toBe(baseCandidate().testCase.expectedResult);
+  });
+
+  it('이미 확인 필요를 말하는 기대 결과에는 다시 붙이지 않는다', () => {
+    const input = external(['req-x'], 'source_explicit');
+    input.testCase = { ...input.testCase, expectedResult: '확인 필요 — 정책 미정' };
+    const [row] = analyze(withRequirements(requirement({ needsConfirmation: true })), input).rows;
+    expect(row.candidate.testCase.expectedResult).toBe('확인 필요 — 정책 미정');
+  });
+
+  it('저장 계획도 확인 필요 · 초안이고 조건은 재검토 필요다(외부 후보가 source_explicit이라고 보내도)', () => {
+    const ctx = withRequirements(requirement({ needsConfirmation: true }));
+    const analysis = analyze(ctx, external(['req-x'], 'source_explicit'));
+    const result = plan(ctx, analysis);
+    expect(result.testCases[0]).toMatchObject({ generationType: 'needs_confirmation', status: 'draft' });
+    expect(result.testCases[0].expectedResult).toMatch(/^확인 필요 — /);
+    expect(result.testConditions[0].status).toBe('needs_review');
+    expect(result.summary).toMatchObject({ created: 1, needsConfirmation: 1 });
+  });
+
+  it('요구사항이 확인 필요로 바뀌면 같은 외부 후보의 지문이 달라져 오래된 미리보기로 거부된다', () => {
+    const before = analyze(withRequirements(requirement()), external(['req-x'], 'source_explicit'));
+    expect(analyze(withRequirements(requirement()), external(['req-x'], 'source_explicit')).rows[0].fingerprint).toBe(before.rows[0].fingerprint);
+    const flagged = withRequirements(requirement({ needsConfirmation: true }));
+    const after = analyze(flagged, external(['req-x'], 'source_explicit'));
+    expect(after.rows[0].fingerprint).not.toBe(before.rows[0].fingerprint);
+    expect(() => planTestDraftGeneration(flagged, after, toTestDraftDecisionInputs(before), { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+  });
+});

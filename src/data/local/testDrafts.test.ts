@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { activityLinkLabel, activityLinkPath } from '@/domain/activityRecords';
 import {
+  analyzeTestDraftCandidates,
   analyzeTestDraftGeneration,
+  planTestDraftGeneration,
   produceRuleBasedTestDrafts,
   StaleTestDraftPreviewError,
   TestDraftGenerationError,
@@ -503,6 +505,24 @@ describe('확인 필요 TC의 상태 보호(저장소 경계)', () => {
     // 초안으로 되돌리거나 폐기는 막지 않는다.
     expect((await repos.testCases.updateStatus('tc-015', 'draft')).status).toBe('draft');
     expect((await repos.testCases.updateStatus('tc-010', 'deprecated')).status).toBe('deprecated');
+  });
+
+  it('외부 생산자가 source_explicit이라고 보낸 확인 필요 요구사항의 후보도 확인 필요 TC가 되어 검토 완료 · 사용 중으로 바꿀 수 없다', async () => {
+    const seed = createSeed();
+    const { context } = await previewOf((await open(createSeed())).repos, { requirementIds: ['req-004'], perspectives: ['normal_flow'] });
+    const [ruleBased] = produceRuleBasedTestDrafts(context, { requirementIds: ['req-004'], perspectives: ['normal_flow'] }).candidates;
+    const candidate = { ...ruleBased, generationType: 'source_explicit' as const, testCase: { ...ruleBased.testCase, expectedResult: '가입 화면이 열린다.' } };
+    const analysis = analyzeTestDraftCandidates(context, [candidate], [], { requirementCount: 1, perspectiveCount: 1 });
+    const planned = planTestDraftGeneration(context, analysis, toTestDraftDecisionInputs(analysis), { createId: (prefix) => `${prefix}-external`, now: '2026-10-05T00:00:00.000Z' });
+    expect(planned.testCases[0]).toMatchObject({ id: 'tc-external', generationType: 'needs_confirmation', expectedResult: '확인 필요 — 가입 화면이 열린다.' });
+    seed.testConditions.push(...planned.testConditions);
+    seed.testCases.push(...planned.testCases);
+    const { repos, base } = await open(seed);
+    const before = await snapshot(repos, base);
+    for (const status of ['reviewed', 'active'] as const) {
+      await expect(repos.testCases.updateStatus('tc-external', status)).rejects.toThrow('확인 필요 TC는 확인사항이 답변되기 전에는 검토 완료로 표시할 수 없어요.');
+    }
+    expect(await snapshot(repos, base)).toEqual(before);
   });
 
   it('일반 TC는 재검토 필요 → 검토 완료가 그대로 가능하다', async () => {

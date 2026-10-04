@@ -121,6 +121,7 @@ type Clue = RegExp | ((text: string) => boolean);
 // - 주체 바로 뒤에 조사가 붙고 그 뒤가 띄어져야 주체다("관리자 페이지" · "운영자가이드"의 관리자 · 운영자는 주체가 아니다).
 // - 주체와 동작 사이에는 목적어 · 장소 하나만 올 수 있다. 다른 주체(은/는/이/가 · 에게 · 에서)나 다른 구절(-고 · -면 · -한)이 끼면 잇지 않는다.
 // - 동작은 동사로 쓰여야 한다("접근 기록" · "요청서" · "통신 여부"처럼 명사의 일부이면 동작이 아니다).
+// - 권한 동작은 그 구절의 서술어여야 한다("운영자만 수정한 문서"처럼 뒤 명사를 꾸미는 관형절이면 권한 서술이 아니다).
 // 애매하면 만들지 않는다(정확도 우선). 놓친 조합은 미리보기에 이유와 함께 보인다.
 
 /** 앞에 다른 글자가 붙지 않은 낱말의 시작("옵서버"의 서버는 통신 주체가 아니다) */
@@ -128,11 +129,25 @@ const WORD_START = '(?<![가-힣A-Za-z0-9])';
 /** 뒤에 다른 글자가 붙지 않은 낱말의 끝 */
 const WORD_END = '(?![가-힣A-Za-z0-9])';
 /**
- * 주체와 동작 사이에 올 수 있는 목적어 · 장소 하나(없어도 된다): 꾸밈 명사 두 개까지 + 을/를/에로 끝나는 명사. 예: "주문 내역을" · "설정 메뉴를" · "결제 화면에".
- * 꾸밈 낱말이 조사(은/는/이/가/을/를/에/에게/에서/만/도/와/과/로)나 어미(-고 · -며 · -면 · -한 · -된 · -할 · -던)로 끝나면 새 주체 · 대상 · 구절이 시작된 것이라 잇지 않는다.
+ * 꾸밈 낱말이 조사(은/는/이/가/을/를/에/에게/에서/만/도/와/과/로)나 어미(-고 · -며 · -면 · -한 · -된 · -할 · -던 · -아서)로 끝나면 새 주체 · 대상 · 구절이 시작된 것이라 잇지 않는다.
+ * 같은 글자로 끝나는 흔한 명사(화면 · 문서 · 재고 · 권한 · 한도 · 경로 · 길이)는 조사 · 어미가 아니라 명사로 본다.
  */
-const MODIFIER = '(?:(?![가-힣A-Za-z0-9]*(?:은|는|이|가|을|를|에|게|서|만|도|와|과|로|고|며|면|한|된|할|던)\\s)[가-힣A-Za-z0-9]+\\s+)';
-const OBJECT = `(?:${MODIFIER}{0,2}[가-힣A-Za-z0-9]+(?:을|를|에)\\s+)?`;
+const PHRASE_BOUNDARY = [
+  '은|는|을|를|에|게|만|와|과|며|된|할|던|가',
+  '(?<![길높깊넓])이',
+  '(?:에|[아어여해와워져])서',
+  '(?<![속한정온강빈용])도',
+  '(?<![경자도])로',
+  '(?<![재광공참])고',
+  '(?<![화장측정표전후])면',
+  '(?<![권기제])한',
+].join('|');
+const MODIFIER = `(?:(?![가-힣A-Za-z0-9]*(?:${PHRASE_BOUNDARY})\\s)[가-힣A-Za-z0-9]+\\s+)`;
+/**
+ * 주체와 동작 사이에 올 수 있는 목적어 · 장소(없어도 된다). 각각 꾸밈 명사 두 개까지 + 을/를/에/에게로 끝나는 명사이고 두 개까지 온다.
+ * 예: "주문 내역을" · "결제 화면에" · "클라이언트에 토큰을". 은/는/이/가가 붙은 낱말(새 주체)은 올 수 없다.
+ */
+const OBJECT = `(?:${MODIFIER}{0,2}[가-힣A-Za-z0-9]+(?:을|를|에게|에)\\s+){0,2}`;
 /**
  * 동작이 구절을 끝맺는다: "없다" · "않는다" · "불가." · "않도록 한다".
  * "않으면" · "없는 경우" · "못한 사용자" · "없고"처럼 조건 · 꾸밈 · 연결 어미이면 제한이 아니라 다른 동작의 조건이나 일부다.
@@ -143,28 +158,46 @@ const CLAUSE_END = '(?:[가-힣]*(?:다|음|함|됨|요)|[가-힣]*(?:게|도록
 const permissionExplicit = /접근\s*권한|권한\s*[이을가]?\s*(?:있|없|필요)|권한에\s*따라|권한별|권한\s*제한|접근\s*제어/;
 
 /** 권한 주체 */
-const ROLE = '(?:관리자|운영자|비회원|비로그인(?:\\s*사용자)?|로그인하지\\s*않은\\s*사용자|로그인한\\s*사용자)(?:\\s*역할)?';
+const ROLE = '(?:관리자|운영자|비회원|일반\\s*사용자|비로그인(?:\\s*사용자)?|로그인하지\\s*않은\\s*사용자|로그인한\\s*사용자)(?:\\s*역할)?';
 /** 권한으로 제한되는 동작 */
 const ACTION = '(?:접근|사용|이용|수정|조회|열람|삭제|등록|노출|진입|다운로드|업로드|변경|구매|주문|작성|승인)';
-/** 동작이 동사로 쓰였다: "접근할" · "노출한다" · "수정 가능". "접근 기록" · "수정 내역"처럼 다른 명사를 꾸미면 동작이 아니다. */
-const ACTION_VERB = `${ACTION}(?:하|할|한|합|되|될|된|됩|\\s*가능|이\\s*가능)`;
-/** 조건 · 가정: "접근하면" · "접근할 수 있는 경우" · "수정할 때" */
-const CONDITIONAL = '(?![^,.;:!?·\\n]*(?:면(?![가-힣])|경우|때(?![가-힣])|\\s시(?![가-힣])))';
+
+// 아래 술어는 모두 CLAUSE_END와 함께 쓴다. 동작이 그 구절의 서술어여야 하고,
+// "수정한 문서" · "등록된 항목"(관형절) · "접근하면" · "접근할 수 있는 경우"(조건)처럼 뒤 명사나 다른 동작에 걸리면 권한 서술이 아니다.
+
+/** 그 주체에게만 허용되는 서술: 할 수 있다 · 가능하다 · 노출한다 · 접근을 허용한다 */
+const ALLOWED = `${ACTION}(?:할\\s*수\\s*있|(?:이|은|는)?\\s*가능|하|한|합|되|된|됩|(?:을|를|이|가)?\\s*(?:허용|허가)(?:하|한|합|되|된|됩))`;
 /** 할 수 없다 · 하지 못한다 · 불가 · 제한된다: 그 주체가 할 수 없게 막는다 */
 const ABLE_DENIED = '(?:할\\s*수\\s*없|하지\\s*못|(?:은|는|이|가)?\\s*불가|(?:이|가)?\\s*제한)';
 /** 하지 않는다 · 되지 않는다: 시스템이 그 주체에게 하지 않는다. 주체가 스스로 하지 않는 일반 동작("관리자가 승인하지 않는다")과 구분하려고 "주체에게는"에만 쓴다. */
 const PLAIN_DENIED = '(?:하|되)지\\s*않';
+/**
+ * 접근을 허용한다 · 편집을 허용하지 않는다: 시스템이 그 주체에게 허락하거나 막는다. 주체에게 허용 · 허가하는 것 자체가 권한 서술이라 동작 낱말을 가리지 않는다.
+ * 허락하는 쪽이 주체일 수 있어("관리자가 접근을 허용한다") "주체에게"에만 쓴다.
+ */
+const GRANTED = `${MODIFIER}{0,2}[가-힣A-Za-z0-9]+(?:을|를|이|가)?\\s*(?:허용|허가)(?:하|한|합|되|된|됩)(?:지\\s*(?:않|못))?`;
+/** 권한 서술이 구절을 끝맺거나, "할 수 있고 · 할 수 없으며"처럼 대등하게 이어진다(조건 · 관형이 아니다). "하지 못하고"는 사건일 수 있어 이어짐으로 보지 않는다. */
+const PERMISSION_END = `(?:${CLAUSE_END}|(?<=있|없)(?:고|으며)(?=\\s*,?\\s))`;
 
-/** "주체만 · 주체에게만 · 주체 역할에만 + (목적어) + 동작": 그 주체에게만 허용한다. 만이 주체에 바로 붙어야 한다("로고만"은 대상 한정이다). */
-const permissionOnly = new RegExp(`${ROLE}(?:만|에만|에게만)\\s+${OBJECT}${ACTION_VERB}${CONDITIONAL}`);
-/** "주체는 · 주체가 + (목적어) + 할 수 없다/불가/제한", "주체에게는 + (목적어) + 하지 않는다": 그 주체에게 막는다 */
-const permissionDenied = new RegExp(`${ROLE}(?:은|는|이|가|에게는)\\s+${OBJECT}${ACTION}${ABLE_DENIED}${CLAUSE_END}|${ROLE}에게는\\s+${OBJECT}${ACTION}${PLAIN_DENIED}${CLAUSE_END}`);
+const permissionRelation = new RegExp(
+  [
+    // 주체만 · 주체에게만 · 주체 역할에만 + (목적어) + 허용 서술. 만이 주체에 바로 붙어야 한다("로고만"은 대상 한정이다).
+    `${ROLE}(?:만|에만|에게만)\\s+${OBJECT}${ALLOWED}${PERMISSION_END}`,
+    // 주체는 · 주체가 · 주체에게는 + (목적어) + 할 수 없다 · 불가 · 제한
+    `${ROLE}(?:은|는|이|가|에게는)\\s+${OBJECT}${ACTION}${ABLE_DENIED}${PERMISSION_END}`,
+    // 주체에게는 + (목적어) + 하지 않는다
+    `${ROLE}에게는\\s+${OBJECT}${ACTION}${PLAIN_DENIED}${CLAUSE_END}`,
+    // 주체에게 · 주체에게만 · 주체에게는 + (목적어) + 접근을 허용한다 · 허용하지 않는다
+    `${ROLE}(?:에게|에게만|에게는|에만)\\s+${OBJECT}${GRANTED}${CLAUSE_END}`,
+  ].join('|'),
+);
 
 /**
  * API를 직접 말하는 기술 용어(단독으로 강한 단서).
- * 한국어 "상태 코드"만으로는 주문 · 배송 · 회원 상태 코드 같은 업무 값일 수 있어 단서로 보지 않는다. 응답의 상태 코드 · status code만 쓴다(HTTP · API 상태 코드는 HTTP · API로 이미 잡힌다).
+ * 한국어 "상태 코드" · "응답 상태 코드"만으로는 주문 · 배송 · 설문 응답 · 고객 응답 상태 코드 같은 업무 값일 수 있어 단서로 보지 않는다.
+ * status code와, 기술 응답임이 드러난 상태 코드(apiStatusCode)만 쓴다. HTTP · API 상태 코드는 HTTP · API로 이미 잡힌다.
  */
-const apiExplicit = /\bapi\b|엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|응답(?:의)?\s*상태\s*코드|request.{0,30}response/i;
+const apiExplicit = /\bapi\b|엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|request.{0,30}response/i;
 
 /** 통신 주체. 앞뒤에 다른 글자가 붙은 복합어("옵서버" · "서버실")는 아니다. */
 const NETWORK = `${WORD_START}(?:서버|네트워크)`;
@@ -177,15 +210,20 @@ const COMM_EXCHANGE = `${MODIFIER}{0,2}(?:요청|응답)(?:을|를|이|가)\\s*(
 /** 통신 낱말이 사건으로 쓰였다: "서버 응답이 실패하면" · "네트워크 요청 후" · "서버 요청 실패". "서버 요청 화면" · "네트워크 통신 설정"처럼 다른 명사를 꾸미면 아니다. */
 const COMM_EVENT = `(?:요청|응답|호출|통신)(?:(?:이|가|을|를|은|는|에)${WORD_END}|\\s+(?:(?:후|시|중)(?:에|에는)?${WORD_END}|실패|성공|결과|값|데이터|오류))`;
 
+/** 서버 · 네트워크를 상대로 하는 통신 동작: 요청 · 응답 · 호출 · 통신 + 데이터를 보내고 받는 전송 · 송신 · 수신. 앞에 다시 · 즉시 같은 부사가 올 수 있다. */
+const NETWORK_ACTION = `(?:(?:다시|즉시|먼저|바로)\\s+)?(?:${COMM_VERB}|(?:전송|송신|수신)(?:하|한|할|합|해|했|되|된|됩)|${COMM_EXCHANGE})`;
+
 /** 서버 · 네트워크와 통신 동작의 관계 */
 const networkCommunication = new RegExp(
   [
-    // 서버에 요청을 보낸다 · 서버로 요청한다 · 서버에 데이터를 요청한다
-    `${NETWORK}(?:에|로|으로|에게)\\s+${OBJECT}(?:${COMM_VERB}|${COMM_EXCHANGE})`,
+    // 서버에 요청을 보낸다 · 서버로 요청한다 · 서버에 데이터를 다시 요청한다 · 네트워크로 데이터를 전송한다
+    `${NETWORK}(?:에|로|으로|에게)\\s+${OBJECT}${NETWORK_ACTION}`,
     // 서버에서 응답을 받는다 · 서버로부터 응답을 받는다
-    `${NETWORK}(?:에서|로부터)\\s+${OBJECT}(?:${COMM_VERB}|${COMM_EXCHANGE})`,
+    `${NETWORK}(?:에서|로부터)\\s+${OBJECT}${NETWORK_ACTION}`,
+    // 서버에서 받은 응답 · 서버로부터 온 데이터: 서버가 출처인 통신 결과
+    `${NETWORK}(?:에서|로부터)\\s+(?:받은|온|돌아온|내려온)\\s+(?:응답|데이터|값|결과)(?:을|를|이|가|은|는|에|의)?${WORD_END}`,
     // 서버가 응답한다 · 서버가 요청을 보낸다
-    `${NETWORK}(?:이|가|은|는)\\s+${OBJECT}(?:${COMM_VERB}|${COMM_EXCHANGE})`,
+    `${NETWORK}(?:이|가|은|는)\\s+${OBJECT}${NETWORK_ACTION}`,
     // 서버를 호출한다
     `${NETWORK}(?:을|를)\\s+호출(?:하|한|할|합|해|했)`,
     // 서버와 통신한다 · 서버와 통신이 끊기면
@@ -194,21 +232,43 @@ const networkCommunication = new RegExp(
     `${NETWORK}\\s+${COMM_EVENT}`,
   ].join('|'),
 );
-/** "클라이언트가 요청한다" · "클라이언트에서 요청한": 클라이언트가 통신 동작의 주체 · 출발점이다 */
-const clientCommunication = new RegExp(`${CLIENT}(?:이|가|에서)\\s+${COMM_VERB}`);
-const clientCommunicationEnd = new RegExp(`${CLIENT}(?:이|가|에서)\\s+${COMM_VERB}${CLAUSE_END}`);
-const networkWord = new RegExp(`${NETWORK}(?:에|로|으로|에서|와|과|이|가|은|는|을|를|의)?${WORD_END}`);
 /**
- * 통신 관계. 클라이언트는 "클라이언트가 요청한 시안"처럼 고객사의 업무 요청일 수 있어,
- * 통신 동작이 구절을 끝맺거나("클라이언트가 요청한다") 같은 문장에 서버 · 네트워크가 있을 때만 본다.
+ * 클라이언트와 통신 동작의 관계. 클라이언트는 "클라이언트가 요청한 시안"처럼 고객사의 업무 요청일 수 있어 더 좁게 본다.
+ * 문장 어딘가에 서버 · 네트워크 낱말이 있는지(문장 전체 AND)는 보지 않는다("클라이언트가 요청한 명함에 서버 이름을 표시한다").
+ * 클라이언트가 서버에 요청하는 문장은 서버 쪽 관계(networkCommunication)로 잡힌다.
  */
-const apiCommunication = (text: string) =>
-  networkCommunication.test(text) || clientCommunicationEnd.test(text) || (clientCommunication.test(text) && networkWord.test(text));
+const clientCommunication = new RegExp(
+  [
+    // 클라이언트가 요청한다: 통신 동작이 구절을 끝맺는다
+    `${CLIENT}(?:이|가|에서)\\s+${COMM_VERB}${CLAUSE_END}`,
+    // 클라이언트가 요청하면 서버가 · 클라이언트에서 요청한 값을 서버가: 클라이언트의 요청을 바로 다음 구절의 서버가 받아 처리한다.
+    // 서버에 주체 조사가 붙어야 한다("서버 이름" · "서버 담당자"처럼 다른 명사를 꾸미면 아니다). 관형절은 업무 요청과 헷갈려 "클라이언트에서"에만 쓴다.
+    `${CLIENT}(?:이|가|에서)\\s+(?:요청|전송|호출)(?:하면|되면|한\\s+뒤|한\\s+후|할\\s+때),?\\s+${NETWORK}(?:이|가|은|는|에서)${WORD_END}`,
+    `${CLIENT}에서\\s+(?:요청|전송|호출)한\\s+[가-힣A-Za-z0-9]+(?:을|를|은|는|이|가)\\s+${NETWORK}(?:이|가|은|는|에서)${WORD_END}`,
+  ].join('|'),
+);
+
+/**
+ * 기술 응답의 상태 코드: "서버 응답 상태 코드" · "서버 응답의 상태 코드", 또는 구절 맨 앞의 "응답 상태 코드"가 HTTP 상태 값(100~599)과 비교될 때.
+ * "설문 응답 상태 코드"처럼 업무 명사가 응답을 꾸미거나 값이 업무 값(DONE · READY)이면 아니다.
+ */
+const apiStatusCode = new RegExp(`${NETWORK}\\s*응답(?:의)?\\s*상태\\s*코드|(?:^|[,.;:!?·]\\s*)응답(?:의)?\\s*상태\\s*코드(?:가|는|이)?\\s*[1-5]\\d\\d(?!\\d)`);
+
+/** 실패 뒤 다시 하는 동작: 실패 시 · 실패하면 · 실패한 경우 · 실패 후 + 다시 · 재 */
+const RETRY_AFTER_FAILURE = '\\s*(?:이|가|에)?\\s*실패(?:\\s*시|하면|한\\s*경우|할\\s*때|\\s*후)?,?\\s+(?:다시\\s*|재)';
+/**
+ * 실패한 통신을 다시 하는 관계: "요청 실패 시 다시 호출한다" · "호출 실패 시 다시 요청한다" · "호출에 실패하면 재요청한다".
+ * 요청 · 호출이 구절 맨 앞에 있어야 하고(앞에 업무 명사가 꾸미는 "휴가 요청 실패"는 아니다) 둘 중 하나는 호출이어야 한다("요청 실패 시 다시 요청한다"는 업무 요청일 수 있다).
+ */
+const apiRetry = new RegExp(`(?:^|[,.;:!?·]\\s*)(?:호출${RETRY_AFTER_FAILURE}(?:호출|요청|전송)|요청${RETRY_AFTER_FAILURE}호출)(?:하|한|합|해|했|된|됩)`);
+
+/** 통신 관계 */
+const apiCommunication = (text: string) => networkCommunication.test(text) || clientCommunication.test(text) || apiStatusCode.test(text) || apiRetry.test(text);
 
 const clues: Partial<Record<TestPerspective, Clue>> = {
   // 숫자만으로는 부족하다(연도 · 버전 · 번호). 한계를 뜻하는 말이 있거나 숫자 바로 뒤에 이상 · 이하 · 초과 · 미만 · 이내가 와야 한다.
   boundary: /최소|최대|\d[\d,.]*\s*[가-힣A-Za-z%]{0,3}\s*(?:이상|이하|초과|미만|이내)|길이|자리|범위|\d+\s*개\s*까지|\d+\s*[~∼]\s*\d+/,
-  permission: (text) => permissionExplicit.test(text) || permissionOnly.test(text) || permissionDenied.test(text),
+  permission: (text) => permissionExplicit.test(text) || permissionRelation.test(text),
   // "변경" · "종료"처럼 일반적인 말은 뺐다. 상태가 이어지거나 바뀌는 것을 뜻하는 표현만 쓴다.
   state_change: /유지|전환|재실행|재시작|재접속|재진입|복원|만료|상태\s*(?:변화|변경)|상태가\s*바뀌|종료\s*(?:후|했다가|한\s*뒤)/,
   // "입력" · "수정" · "보냄"은 뺐다. 데이터를 저장 · 조회 · 주고받는 것을 뜻하는 표현만 쓴다.
@@ -453,8 +513,24 @@ function fingerprintOf(row: Omit<AnalyzedTestDraft, 'fingerprint'>, targetState:
   );
 }
 
+/** 근거 유형의 신뢰 순서. 클수록 검토가 더 필요하다. 기존 TC 가져오기는 출처를 나타낼 뿐이라 산출물 직접 근거와 같게 본다. */
+const generationTypeRank: Record<TestCaseGenerationType, number> = { source_explicit: 0, imported_existing: 0, ai_suggestion: 1, needs_confirmation: 2 };
+
+/**
+ * 후보의 근거 유형을 연결 요구사항(저장된 원본) 기준으로 다시 정한다. 생산자(규칙 · AI)가 보낸 값은 믿지 않는다.
+ * 요구사항 쪽이 더 검토가 필요하면 그 값으로 올리고, 생산자가 더 조심스럽게 보낸 값(예: 확인 필요)은 낮추지 않는다.
+ * 확인 필요로 올라간 후보의 기대 결과가 확인 필요를 말하지 않으면 앞에 붙여, 확정된 기대 결과처럼 보이지 않게 한다.
+ */
+function withCanonicalGenerationType(candidate: TestDraftCandidate, requirements: Requirement[]): TestDraftCandidate {
+  const canonical = generationTypeOf(requirements);
+  if (generationTypeRank[canonical] <= generationTypeRank[candidate.generationType]) return candidate;
+  if (canonical !== 'needs_confirmation' || candidate.testCase.expectedResult.startsWith('확인 필요')) return { ...candidate, generationType: canonical };
+  return { ...candidate, generationType: canonical, testCase: { ...candidate.testCase, expectedResult: `확인 필요 — ${candidate.testCase.expectedResult}` } };
+}
+
 /**
  * 후보를 판정한다. 후보가 어디서 왔든 같은 규칙이다.
+ * 근거 유형은 생산자가 보낸 값이 아니라 연결 요구사항 기준으로 다시 정한다(withCanonicalGenerationType). 확인 필요 요구사항의 후보는 항상 확인 필요다.
  * - 같은 프로젝트의 요구사항이 아니거나 제거된 요구사항이거나 근거 산출물이 이 프로젝트에 없으면 오류(invalid)다.
  * - 구분 · 기능 · 제목 · 절차 · 기대 결과가 정확히 같은(공백 · 유니코드 정규화만 무시) 기존 TC(폐기 제외)나 앞선 후보가 있으면 중복이다. 비슷한 것은 같다고 보지 않는다.
  *   중복은 자동으로 버리지 않고 사용자가 판단한다. 비교 대상(기존 TC 또는 앞선 후보)과, 기존 TC에 이 후보의 요구사항이 이미 연결돼 있는지를 함께 돌려준다.
@@ -489,7 +565,9 @@ export function analyzeTestDraftCandidates(
   const firstKeyByIdentity = new Map<string, string>();
   const fingerprintByKey = new Map<string, string>();
   const rows = candidates.map((input): AnalyzedTestDraft => {
-    const candidate: TestDraftCandidate = { ...input, requirementIds: normalizeIds(input.requirementIds) };
+    const requirementIds = normalizeIds(input.requirementIds);
+    const linked = requirementIds.map((id) => requirementById.get(id));
+    const candidate = withCanonicalGenerationType({ ...input, requirementIds }, linked.filter((item): item is Requirement => !!item));
     if (seenKeys.has(candidate.key)) throw new TestDraftGenerationError(`같은 후보가 두 번 있어요. (${candidate.key})`);
     seenKeys.add(candidate.key);
     const needsConfirmation = candidate.generationType === 'needs_confirmation';
@@ -497,7 +575,6 @@ export function analyzeTestDraftCandidates(
     const reused = existingConditions.get(conditionIdentity(candidate.requirementIds, candidate.condition.feature, candidate.condition.title));
     const condition = { ...(reused && { reusedConditionId: reused.id }) };
     const save = { templateId, reusedConditionStatus: reused?.status ?? null };
-    const linked = candidate.requirementIds.map((id) => requirementById.get(id));
     const reasons: string[] = [];
     if (candidate.requirementIds.length === 0) reasons.push('근거 요구사항이 없어요.');
     linked.forEach((requirement, index) => {
