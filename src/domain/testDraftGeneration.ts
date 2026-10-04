@@ -160,13 +160,20 @@ const permissionExplicit = /접근\s*권한|권한\s*[이을가]?\s*(?:있|없|�
 /** 권한 주체 */
 const ROLE = '(?:관리자|운영자|비회원|일반\\s*사용자|비로그인(?:\\s*사용자)?|로그인하지\\s*않은\\s*사용자|로그인한\\s*사용자)(?:\\s*역할)?';
 /** 권한으로 제한되는 동작 */
-const ACTION = '(?:접근|사용|이용|수정|조회|열람|삭제|등록|노출|진입|다운로드|업로드|변경|구매|주문|작성|승인)';
+const ACTION = '(?:접근|사용|이용|수정|조회|열람|삭제|등록|노출|진입|다운로드|업로드|변경|구매|주문|작성|승인|취소|편집|읽기|쓰기)';
 
 // 아래 술어는 모두 CLAUSE_END와 함께 쓴다. 동작이 그 구절의 서술어여야 하고,
 // "수정한 문서" · "등록된 항목"(관형절) · "접근하면" · "접근할 수 있는 경우"(조건)처럼 뒤 명사나 다른 동작에 걸리면 권한 서술이 아니다.
 
-/** 그 주체에게만 허용되는 서술: 할 수 있다 · 가능하다 · 노출한다 · 접근을 허용한다 */
-const ALLOWED = `${ACTION}(?:할\\s*수\\s*있|(?:이|은|는)?\\s*가능|하|한|합|되|된|됩|(?:을|를|이|가)?\\s*(?:허용|허가)(?:하|한|합|되|된|됩))`;
+/** 동작을 하는 형태: "수정할" · "수정 할" · "수정을 할"(명사 + 을/를 + 하다) · "조회만 할"(동작의 범위를 그 동작으로 한정) */
+const ACTION_DO = `${ACTION}(?:(?:을|를|만)\\s*|\\s*)`;
+/**
+ * 할 수 있다 · 할 수 없다 · 하지 못한다: 그 주체가 그 동작을 할 수 있는지를 말한다(권한 서술).
+ * "승인을 하지 않는다" · "등록을 하고"처럼 할 수 있음을 말하지 않는 일반 업무 서술은 아니다.
+ */
+const CAPABILITY = `${ACTION_DO}(?:할\\s*수\\s*(?:있|없)|하지\\s*못)`;
+/** 그 주체에게만 허용되는 서술: 할 수 있다 · 수정을 할 수 있다 · 가능하다 · 노출한다 · 접근을 허용한다 */
+const ALLOWED = `(?:${ACTION_DO}할\\s*수\\s*있|${ACTION}(?:(?:이|은|는)?\\s*가능|하|한|합|되|된|됩|(?:을|를|이|가)?\\s*(?:허용|허가)(?:하|한|합|되|된|됩)))`;
 /** 할 수 없다 · 하지 못한다 · 불가 · 제한된다: 그 주체가 할 수 없게 막는다 */
 const ABLE_DENIED = '(?:할\\s*수\\s*없|하지\\s*못|(?:은|는|이|가)?\\s*불가|(?:이|가)?\\s*제한)';
 /** 하지 않는다 · 되지 않는다: 시스템이 그 주체에게 하지 않는다. 주체가 스스로 하지 않는 일반 동작("관리자가 승인하지 않는다")과 구분하려고 "주체에게는"에만 쓴다. */
@@ -185,6 +192,9 @@ const permissionRelation = new RegExp(
     `${ROLE}(?:만|에만|에게만)\\s+${OBJECT}${ALLOWED}${PERMISSION_END}`,
     // 주체는 · 주체가 · 주체에게는 + (목적어) + 할 수 없다 · 불가 · 제한
     `${ROLE}(?:은|는|이|가|에게는)\\s+${OBJECT}${ACTION}${ABLE_DENIED}${PERMISSION_END}`,
+    // 주체는 · 주체가 + (목적어) + 할 수 있다 · 할 수 없다 · 승인을 할 수 없다 · 조회만 할 수 있다: 그 주체의 동작 범위를 말한다.
+    // 한 문장에 여러 주체가 있으면("관리자는 수정할 수 있고 일반 사용자는 조회만 할 수 있다") 각 구절을 따로 본다.
+    `${ROLE}(?:은|는|이|가)\\s+${OBJECT}${CAPABILITY}${PERMISSION_END}`,
     // 주체에게는 + (목적어) + 하지 않는다
     `${ROLE}에게는\\s+${OBJECT}${ACTION}${PLAIN_DENIED}${CLAUSE_END}`,
     // 주체에게 · 주체에게만 · 주체에게는 + (목적어) + 접근을 허용한다 · 허용하지 않는다
@@ -197,7 +207,17 @@ const permissionRelation = new RegExp(
  * 한국어 "상태 코드" · "응답 상태 코드"만으로는 주문 · 배송 · 설문 응답 · 고객 응답 상태 코드 같은 업무 값일 수 있어 단서로 보지 않는다.
  * status code와, 기술 응답임이 드러난 상태 코드(apiStatusCode)만 쓴다. HTTP · API 상태 코드는 HTTP · API로 이미 잡힌다.
  */
-const apiExplicit = /\bapi\b|엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|request.{0,30}response/i;
+const apiExplicit = /엔드포인트|endpoint|\bhttp\b|\brest\b|graphql|status\s*code|request.{0,30}response/i;
+
+/** 사람 · 조직을 뜻하는 명사. "API 담당자" · "API 운영 조직"의 API는 업무 이름이지 기술 사용이 아니다. */
+const PERSON_OR_TEAM = '(?:담당|팀|조직|부서|매니저|책임자|관리자|운영자|개발자|기획자|파트너|협력사|업체)';
+/** API와 사람 · 조직 명사 사이에 올 수 있는 꾸밈 낱말(운영 · 개발 · 교육 · 문서 등). 통신 낱말이 끼면("API 호출 실패 담당자") 기술 사용이 섞인 것이라 꾸밈으로 보지 않는다. */
+const BUSINESS_WORD = '(?!호출|요청|응답|연결|통신|전송|수신|실패|오류|에러|상태|코드|키|토큰|서버)[가-힣A-Za-z]+';
+/**
+ * API를 기술로 쓴다: API 낱말이 있고 그것이 사람 · 조직 명사를 꾸미지 않는다. 문장 안의 API 하나하나를 따로 본다
+ * ("API 담당자가 API 호출 실패 로그를 확인한다"는 뒤의 API가 기술 사용이다).
+ */
+const apiTechnical = new RegExp(`\\bapi\\b(?!(?:\\s*${BUSINESS_WORD}){0,2}\\s*${PERSON_OR_TEAM})`, 'i');
 
 /** 통신 주체. 앞뒤에 다른 글자가 붙은 복합어("옵서버" · "서버실")는 아니다. */
 const NETWORK = `${WORD_START}(?:서버|네트워크)`;
@@ -273,7 +293,7 @@ const clues: Partial<Record<TestPerspective, Clue>> = {
   state_change: /유지|전환|재실행|재시작|재접속|재진입|복원|만료|상태\s*(?:변화|변경)|상태가\s*바뀌|종료\s*(?:후|했다가|한\s*뒤)/,
   // "입력" · "수정" · "보냄"은 뺐다. 데이터를 저장 · 조회 · 주고받는 것을 뜻하는 표현만 쓴다.
   data_io: /저장|조회|불러오|업로드|다운로드|내보내기|가져오기|등록|삭제|전송|데이터|반영되/,
-  api: (text) => apiExplicit.test(text) || apiCommunication(text),
+  api: (text) => apiExplicit.test(text) || apiTechnical.test(text) || apiCommunication(text),
   // 숫자만으로는 부족하다. 성능 · 시간 · 처리량을 뜻하는 표현이 있어야 한다.
   performance: /성능|지연|latency|throughput|\btps\b|동시\s*(?:사용자|접속)|\d+\s*(?:ms|밀리초|초)\s*(?:이내|이하|안에|미만)|(?:응답|처리|로딩)\s*시간/i,
 };
@@ -405,8 +425,14 @@ export const testDraftKindOrder: TestDraftKind[] = ['create', 'duplicate', 'inva
  */
 export type TestDraftDecision = 'create' | 'link_existing' | 'create_separate' | 'excluded' | 'pending';
 
-/** 중복의 비교 대상. existing은 이미 있는 TC(linked: 이 후보의 요구사항이 이미 그 TC에 연결됨), batch는 이번에 만드는 앞선 후보다. */
-export type TestDraftDuplicateTarget = { type: 'existing'; id: string; label: string; linked: boolean; snapshot: string } | { type: 'batch'; key: string };
+/**
+ * 중복의 비교 대상. existing은 이미 있는 TC(linked: 이 후보의 요구사항이 이미 그 TC에 연결됨 · needsConfirmation: 그 TC가 확인 필요 TC임), batch는 이번에 만드는 앞선 후보다.
+ */
+export type TestDraftDuplicateTarget = { type: 'existing'; id: string; label: string; linked: boolean; needsConfirmation: boolean; snapshot: string } | { type: 'batch'; key: string };
+
+/** 확인 필요 후보를 확인 필요가 아닌 기존 TC에 연결하면 기존 TC의 뜻(근거 유형 · 검토 가능 여부)이 조용히 바뀌므로 연결하지 않는다. */
+const linkWouldWeakenConfirmation = (row: Pick<AnalyzedTestDraft, 'needsConfirmation' | 'duplicateTarget'>) =>
+  row.needsConfirmation && row.duplicateTarget?.type === 'existing' && !row.duplicateTarget.needsConfirmation;
 
 export interface AnalyzedTestDraft {
   candidate: TestDraftCandidate;
@@ -480,15 +506,35 @@ function testCaseSnapshot(testCase: TestCase): string {
 }
 
 /**
+ * 후보의 근거 요구사항이 지금 뜻하는 것. 후보 내용 · 확인 필요 여부 · 근거에 영향을 주는 값(프로젝트 · 기능 · 문장 · 근거 유형 · 확인 필요 · 수명 · 근거 위치)만 담는다.
+ * 검토 상태(draft 등)는 생성에 쓰지 않아 뺀다. 문장 · 기능은 공백 · 유니코드 정규화만 무시하고, 근거 위치는 중복을 없애 정렬해 순서만 바뀐 것은 같다고 본다.
+ * 찾을 수 없는 요구사항은 ID와 null로 남긴다(그 후보는 오류다).
+ */
+function requirementsSnapshot(requirementIds: string[], requirementById: ReadonlyMap<string, Requirement>): unknown {
+  return requirementIds.map((id) => {
+    const requirement = requirementById.get(id);
+    if (!requirement) return [id, null];
+    const refs = [...new Set(requirement.sourceRefs.map((ref) => JSON.stringify([ref.deliverableId, ref.locator])))].sort();
+    return [id, requirement.projectId, clean(requirement.feature), clean(requirement.text), requirement.sourceType, requirement.needsConfirmation, requirement.lifecycle, refs];
+  });
+}
+
+/**
  * 저장 결과를 정하는 모든 값을 담은 지문. 필드 순서가 고정된 배열을 직렬화해 안정적이다.
  * 후보 내용 · 근거 · 판정 · 비교 대상 외에 새 TC에 붙을 양식(templateId)과 테스트 조건을 다시 쓰는지(재사용 ID · 상태)도 담는다.
+ * 후보가 기대는 근거 요구사항의 현재 의미(requirementsSnapshot)도 담는다. 외부(AI 등) 생산자가 같은 후보를 그대로 다시 보내도, 요구사항이 바뀌었으면 오래된 미리보기다.
  * 이 값이 하나라도 달라지면 사용자가 본 미리보기와 저장될 결과가 다르다.
  */
-function fingerprintOf(row: Omit<AnalyzedTestDraft, 'fingerprint'>, targetState: unknown, save: { templateId: string | null; reusedConditionStatus: string | null }): string {
+function fingerprintOf(
+  row: Omit<AnalyzedTestDraft, 'fingerprint'>,
+  targetState: unknown,
+  save: { templateId: string | null; reusedConditionStatus: string | null; requirements: unknown },
+): string {
   const { candidate: c } = row;
   return hash53(
     JSON.stringify([
-      'v2',
+      'v3',
+      save.requirements,
       c.key,
       c.perspective,
       c.requirementIds,
@@ -501,7 +547,8 @@ function fingerprintOf(row: Omit<AnalyzedTestDraft, 'fingerprint'>, targetState:
       c.testCase.precondition ?? null,
       c.testCase.steps,
       c.testCase.expectedResult,
-      row.sourceRefs.map((ref) => [ref.deliverableId, ref.locator]),
+      // 근거는 집합이다. 요구사항의 근거 순서만 바뀐 것은 같은 미리보기로 본다.
+      row.sourceRefs.map((ref) => JSON.stringify([ref.deliverableId, ref.locator])).sort(),
       row.kind,
       row.reasons,
       row.needsConfirmation,
@@ -574,7 +621,7 @@ export function analyzeTestDraftCandidates(
     // 테스트 조건을 다시 쓰는지는 TC 판정과 별개로 어느 후보에서나 정한다.
     const reused = existingConditions.get(conditionIdentity(candidate.requirementIds, candidate.condition.feature, candidate.condition.title));
     const condition = { ...(reused && { reusedConditionId: reused.id }) };
-    const save = { templateId, reusedConditionStatus: reused?.status ?? null };
+    const save = { templateId, reusedConditionStatus: reused?.status ?? null, requirements: requirementsSnapshot(candidate.requirementIds, requirementById) };
     const reasons: string[] = [];
     if (candidate.requirementIds.length === 0) reasons.push('근거 요구사항이 없어요.');
     linked.forEach((requirement, index) => {
@@ -606,12 +653,15 @@ export function analyzeTestDraftCandidates(
     if (existing) {
       const alreadyLinked = candidate.requirementIds.every((id) => existing.requirementIds.includes(id));
       const snapshot = testCaseSnapshot(existing);
+      const targetNeedsConfirmation = existing.generationType === 'needs_confirmation';
+      const reasons = [alreadyLinked ? '같은 내용의 TC가 이미 있고 이 요구사항이 연결돼 있어요.' : '같은 내용의 TC가 이미 있어요. 이 요구사항은 그 TC에 연결돼 있지 않아요.'];
+      if (needsConfirmation && !targetNeedsConfirmation && !alreadyLinked) reasons.push('확인 필요 요구사항이라 확인 필요가 아닌 기존 TC에는 연결할 수 없어요. 별도 신규로 만들거나 제외해 주세요.');
       const row = {
         candidate,
         kind: 'duplicate' as const,
-        reasons: [alreadyLinked ? '같은 내용의 TC가 이미 있고 이 요구사항이 연결돼 있어요.' : '같은 내용의 TC가 이미 있어요. 이 요구사항은 그 TC에 연결돼 있지 않아요.'],
+        reasons,
         needsConfirmation,
-        duplicateTarget: { type: 'existing' as const, id: existing.id, label: existing.externalId ?? existing.id, linked: alreadyLinked, snapshot },
+        duplicateTarget: { type: 'existing' as const, id: existing.id, label: existing.externalId ?? existing.id, linked: alreadyLinked, needsConfirmation: targetNeedsConfirmation, snapshot },
         ...condition,
         sourceRefs,
       };
@@ -654,12 +704,15 @@ export function defaultTestDraftDecision(row: AnalyzedTestDraft): TestDraftDecis
   return 'excluded';
 }
 
-/** 후보가 고를 수 있는 판단. pending은 고르는 값이 아니라 판단 전 상태라 넣지 않는다. */
+/**
+ * 후보가 고를 수 있는 판단. pending은 고르는 값이 아니라 판단 전 상태라 넣지 않는다.
+ * 확인 필요 후보는 확인 필요가 아닌 기존 TC에 연결할 수 없다(별도 신규 · 제외만). 이번에 만드는 앞선 후보에는 연결할 수 있고, 그 새 TC가 확인 필요로 올라간다.
+ */
 export function testDraftDecisionOptions(row: AnalyzedTestDraft): TestDraftDecision[] {
   if (row.kind === 'create') return ['create', 'excluded'];
   if (row.kind === 'invalid') return [];
   const alreadyLinked = row.duplicateTarget?.type === 'existing' && row.duplicateTarget.linked;
-  return alreadyLinked ? ['create_separate', 'excluded'] : ['link_existing', 'create_separate', 'excluded'];
+  return alreadyLinked || linkWouldWeakenConfirmation(row) ? ['create_separate', 'excluded'] : ['link_existing', 'create_separate', 'excluded'];
 }
 
 /**
@@ -717,7 +770,12 @@ export function summarizeTestDraftAnalysis(analysis: TestDraftAnalysis, decision
     separate: rowsWith('create_separate').length,
     linked: rowsWith('link_existing').filter((row) => row.duplicateTarget?.type === 'existing').length,
     linkedToNew: rowsWith('link_existing').filter((row) => row.duplicateTarget?.type === 'batch').length,
-    needsConfirmation: creating.filter((row) => row.needsConfirmation).length,
+    // 확인 필요 후보가 앞선 후보에 연결되면 그 새 TC도 확인 필요가 된다.
+    needsConfirmation: creating.filter(
+      (row) =>
+        row.needsConfirmation ||
+        rowsWith('link_existing').some((other) => other.needsConfirmation && other.duplicateTarget?.type === 'batch' && other.duplicateTarget.key === row.candidate.key),
+    ).length,
     duplicate: duplicates.length,
     duplicateSkipped: duplicates.filter((row) => resolved[row.candidate.key] === 'excluded').length,
     pending: duplicates.filter((row) => resolved[row.candidate.key] === 'pending').length,
@@ -779,6 +837,8 @@ const unionRefs = (a: SourceRef[], b: SourceRef[]): SourceRef[] => {
  *   연결로 설계 연결이 바뀐 기존 TC는 변경 영향 분석과 같은 규칙(요구사항 · 조건 · 근거는 설계 내용)으로 revision을 1 올리고 updatedAt을 갱신한다.
  *   이번에 만드는 앞선 후보에 연결하면 그 새 TC에 더하며 revision은 그대로(1)다.
  * - 새 TC는 초안 · revision 1이고 고객사 ID를 만들지 않는다. origin은 manual(규칙 기반이며 AI가 아님)이고 근거 유형은 요구사항에서 물려받는다.
+ *   같은 배치의 뒤 후보가 연결되면 합쳐진 후보 · 요구사항 중 가장 엄격한 근거 유형으로 올린다(확인 필요 > AI 제안 > 직접 근거).
+ * - 확인 필요 요구사항을 확인 필요가 아닌 기존 TC에 새로 연결하는 계획은 거부한다(기존 TC의 근거 유형 · 상태는 바꾸지 않는다).
  * 만들거나 연결할 것이 하나도 없으면 던진다.
  */
 export function planTestDraftGeneration(context: TestDraftContext, analysis: TestDraftAnalysis, inputs: readonly TestDraftDecisionInput[], options: TestDraftPlanOptions): TestDraftPlan {
@@ -904,6 +964,34 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
     const original = existingById.get(id)!;
     const changed = ['requirementIds', 'testConditionIds', 'sourceRefs'].some((field) => JSON.stringify(original[field as 'requirementIds']) !== JSON.stringify(merged[field as 'requirementIds']));
     if (changed) updatedTestCases.push({ ...merged, revision: original.revision + 1, updatedAt: options.now });
+  }
+
+  // 근거 유형 불변식: 최종 TC에 연결된 요구사항이 확인 필요면 그 TC는 확인 필요다. 화면 판단 · 생산자 값과 별개로 저장 직전에 다시 확인한다.
+  const requirementById = new Map(context.requirements.filter((item) => item.projectId === context.project.id).map((item) => [item.id, item]));
+  const canonicalTypeOf = (requirementIds: string[]) => generationTypeOf(requirementIds.map((id) => requirementById.get(id)).filter((item): item is Requirement => !!item));
+  const stricter = (a: TestCaseGenerationType, b: TestCaseGenerationType) => (generationTypeRank[b] > generationTypeRank[a] ? b : a);
+  // 이번에 만드는 TC는 하나로 합쳐진 후보(만든 후보 + 연결한 뒤 후보)와 연결 요구사항 중 가장 엄격한 근거 유형으로 올린다.
+  for (const row of analysis.rows) {
+    const target = row.duplicateTarget;
+    if (decisionByKey.get(row.candidate.key) !== 'link_existing' || target?.type !== 'batch') continue;
+    const created = newByKey.get(target.key)!;
+    created.generationType = stricter(created.generationType, row.candidate.generationType);
+  }
+  for (const testCase of testCases) {
+    const canonical = canonicalTypeOf(testCase.requirementIds);
+    // 확인 필요 요구사항에 이어진 TC의 기대 결과가 확인 필요를 말하지 않으면 확정된 기대 결과처럼 보이므로 만들지 않는다(분석에서 이미 붙였어야 한다).
+    if (canonical === 'needs_confirmation' && !testCase.expectedResult.startsWith('확인 필요')) {
+      throw new TestDraftGenerationError(`확인 필요 요구사항에 이어진 TC의 기대 결과가 확인 필요를 말하지 않아요. 미리보기를 다시 확인해 주세요. (${testCase.title})`);
+    }
+    testCase.generationType = stricter(testCase.generationType, canonical);
+  }
+  // 기존 TC는 뜻을 바꾸지 않는다. 확인 필요가 아닌 기존 TC에 확인 필요 요구사항을 새로 연결하는 계획은 만들지 않는다(fail-closed).
+  for (const [id, merged] of linkedExisting) {
+    const original = existingById.get(id)!;
+    const added = merged.requirementIds.filter((requirementId) => !original.requirementIds.includes(requirementId));
+    if (original.generationType !== 'needs_confirmation' && canonicalTypeOf(added) === 'needs_confirmation') {
+      throw new TestDraftGenerationError(`확인 필요 요구사항은 확인 필요가 아닌 기존 TC에 연결할 수 없어요. (${original.externalId ?? original.id})`);
+    }
   }
 
   // 새 TC도 연결도 없으면(모두 이미 연결됨 · 제외) 아무것도 저장하지 않는다.

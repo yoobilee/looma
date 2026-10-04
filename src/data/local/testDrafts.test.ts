@@ -525,6 +525,62 @@ describe('확인 필요 TC의 상태 보호(저장소 경계)', () => {
     expect(await snapshot(repos, base)).toEqual(before);
   });
 
+  it('같은 배치의 확인 필요 중복을 앞선 TC에 연결하면 그 새 TC는 확인 필요가 되어 검토 완료 · 사용 중으로 바꿀 수 없다', async () => {
+    const seed = createSeed();
+    seed.requirements.push({ ...seed.requirements.find((item) => item.id === 'req-001')!, id: 'req-flag', needsConfirmation: true });
+    const { context } = await previewOf((await open(structuredClone(seed))).repos, { requirementIds: ['req-001'], perspectives: ['normal_flow'] });
+    const [base] = produceRuleBasedTestDrafts(context, { requirementIds: ['req-001'], perspectives: ['normal_flow'] }).candidates;
+    const content = { ...base.testCase, expectedResult: '확인 필요 — 가입 결과를 확인한다.' };
+    const candidates = ['req-001', 'req-flag'].map((id) => ({ ...base, key: `normal_flow|${id}`, requirementIds: [id], generationType: 'source_explicit' as const, testCase: content }));
+    const analysis = analyzeTestDraftCandidates(context, candidates, [], { requirementCount: 2, perspectiveCount: 1 });
+    expect(analysis.rows[1].duplicateTarget).toEqual({ type: 'batch', key: 'normal_flow|req-001' });
+    const planned = planTestDraftGeneration(context, analysis, toTestDraftDecisionInputs(analysis, { 'normal_flow|req-flag': 'link_existing' }), {
+      createId: (prefix) => `${prefix}-batch`,
+      now: '2026-10-05T00:00:00.000Z',
+    });
+    expect(planned.testCases).toEqual([expect.objectContaining({ id: 'tc-batch', generationType: 'needs_confirmation', requirementIds: ['req-001', 'req-flag'] })]);
+    seed.testConditions.push(...planned.testConditions);
+    seed.testCases.push(...planned.testCases);
+    const { repos, base: store } = await open(seed);
+    const before = await snapshot(repos, store);
+    for (const status of ['reviewed', 'active'] as const) {
+      await expect(repos.testCases.updateStatus('tc-batch', status)).rejects.toThrow('확인 필요 TC는 확인사항이 답변되기 전에는 검토 완료로 표시할 수 없어요.');
+    }
+    expect(await snapshot(repos, store)).toEqual(before);
+  });
+
+  it('저장 경로: 확인 필요 요구사항의 후보는 확인 필요가 아닌 기존 TC에 연결할 수 없고, 연결 입력은 아무것도 저장하지 않는다', async () => {
+    const probe = await open();
+    const { analysis: ruleBased } = await previewOf(probe.repos, { requirementIds: ['req-004'], perspectives: ['normal_flow'] });
+    const candidate = ruleBased.rows[0].candidate;
+    const seed = createSeed();
+    // 같은 내용이지만 확인 필요가 아닌 검토 완료 기존 TC
+    seed.testCases.push({
+      ...seed.testCases.find((item) => item.id === 'tc-001')!,
+      id: 'tc-plain-same',
+      externalId: 'SIGN-777',
+      category: candidate.perspective,
+      feature: candidate.testCase.feature,
+      title: candidate.testCase.title,
+      steps: [...candidate.testCase.steps],
+      expectedResult: candidate.testCase.expectedResult,
+      requirementIds: ['req-001'],
+      generationType: 'source_explicit',
+      status: 'reviewed',
+    });
+    const { repos, base } = await open(seed);
+    const { analysis, input } = await previewOf(repos, { requirementIds: ['req-004'], perspectives: ['normal_flow'] }, { [candidate.key]: 'link_existing' });
+    expect(analysis.rows[0]).toMatchObject({ kind: 'duplicate', duplicateTarget: { type: 'existing', id: 'tc-plain-same', needsConfirmation: false } });
+    // 화면 판단은 고를 수 없는 값이라 판단 전(pending)으로 남는다.
+    expect(input.candidates[0].decision).toBe('pending');
+    const before = await snapshot(repos, base);
+    await expect(repos.testCases.createDraftsFromRequirements({ ...input, candidates: input.candidates.map((item) => ({ ...item, decision: 'link_existing' })) })).rejects.toThrow('이 후보에는 쓸 수 없는 판단이에요.');
+    expect(await snapshot(repos, base)).toEqual(before);
+    const separate = await repos.testCases.createDraftsFromRequirements({ ...input, candidates: input.candidates.map((item) => ({ ...item, decision: 'create_separate' })) });
+    expect(separate.testCases[0]).toMatchObject({ generationType: 'needs_confirmation', requirementIds: ['req-004'] });
+    expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-plain-same')).toMatchObject({ generationType: 'source_explicit', status: 'reviewed', requirementIds: ['req-001'] });
+  });
+
   it('일반 TC는 재검토 필요 → 검토 완료가 그대로 가능하다', async () => {
     const seed = createSeed();
     seed.testCases.find((item) => item.id === 'tc-001')!.status = 'needs_review';

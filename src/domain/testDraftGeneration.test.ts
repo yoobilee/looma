@@ -12,6 +12,7 @@ import {
   StaleTestDraftPreviewError,
   summarizeTestDraftAnalysis,
   testDraftCandidateKey,
+  testDraftDecisionOptions,
   TestDraftGenerationError,
   toTestDraftDecisionInputs,
   validateDraftTemplate,
@@ -21,7 +22,7 @@ import {
   type TestDraftDecision,
   type TestDraftDecisionInput,
 } from './testDraftGeneration';
-import type { Project, Requirement, SourceRef, TestCase, TestCondition, TestPerspective } from './types';
+import type { Project, Requirement, SourceRef, TestCase, TestCaseGenerationType, TestCondition, TestPerspective } from './types';
 
 const seed = createSeed();
 const NOW = '2026-10-05T09:00:00.000Z';
@@ -844,5 +845,179 @@ describe('확인 필요는 생산자가 아니라 연결 요구사항 기준이�
     const after = analyze(flagged, external(['req-x'], 'source_explicit'));
     expect(after.rows[0].fingerprint).not.toBe(before.rows[0].fingerprint);
     expect(() => planTestDraftGeneration(flagged, after, toTestDraftDecisionInputs(before), { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+  });
+});
+
+describe('확인 필요 불변식: 하나로 합쳐지는 TC는 가장 엄격한 근거 유형을 따른다', () => {
+  /** 외부 생산자가 보낸 같은 내용의 후보. 확인 필요 요구사항의 후보는 분석이 기대 결과에 확인 필요를 붙이므로, 처음부터 확인 필요를 말하는 내용으로 맞춘다. */
+  const shared = (id: string, generationType: TestDraftCandidate['generationType'] = 'source_explicit'): TestDraftCandidate => ({
+    ...baseCandidate(),
+    key: testDraftCandidateKey('normal_flow', [id]),
+    requirementIds: [id],
+    generationType,
+    condition: { feature: '회원가입', title: `조건 ${id}` },
+    testCase: { ...baseCandidate().testCase, expectedResult: '확인 필요 — 가입 결과를 확인한다.' },
+  });
+  const analyze = (ctx: TestDraftContext, ...candidates: TestDraftCandidate[]) => analyzeTestDraftCandidates(ctx, candidates, [], { requirementCount: candidates.length, perspectiveCount: 1 });
+  const linkRest = (analysis: TestDraftAnalysis) => Object.fromEntries(analysis.rows.slice(1).map((row) => [row.candidate.key, 'link_existing' as const]));
+  const flaggedIn = (requirements: Requirement[], id: string) => {
+    const item = requirements.find((entry) => entry.id === id)!;
+    return item.needsConfirmation || item.sourceType === 'needs_confirmation';
+  };
+
+  it.each([
+    ['직접 근거 + 확인 필요', [requirement({ id: 'a' }), requirement({ id: 'b', needsConfirmation: true })], 'needs_confirmation'],
+    ['확인 필요 + 직접 근거(순서 반대)', [requirement({ id: 'a', needsConfirmation: true }), requirement({ id: 'b' })], 'needs_confirmation'],
+    ['직접 근거 + 근거 유형 확인 필요', [requirement({ id: 'a' }), requirement({ id: 'b', sourceType: 'needs_confirmation' })], 'needs_confirmation'],
+    ['세 후보 중 가운데만 확인 필요', [requirement({ id: 'a' }), requirement({ id: 'b', needsConfirmation: true }), requirement({ id: 'c' })], 'needs_confirmation'],
+    ['AI 제안 + 확인 필요', [requirement({ id: 'a', sourceType: 'ai_suggestion' }), requirement({ id: 'b', needsConfirmation: true })], 'needs_confirmation'],
+    ['직접 근거 + AI 제안', [requirement({ id: 'a' }), requirement({ id: 'b', sourceType: 'ai_suggestion' })], 'ai_suggestion'],
+    ['직접 근거 + 직접 근거', [requirement({ id: 'a' }), requirement({ id: 'b' })], 'source_explicit'],
+  ] as [string, Requirement[], TestCaseGenerationType][])('같은 배치 중복을 앞선 후보에 연결: %s → %s', (_, requirements, expected) => {
+    const ctx = withRequirements(...requirements);
+    const analysis = analyze(ctx, ...requirements.map((item) => shared(item.id)));
+    expect(analysis.rows.slice(1).map((row) => row.duplicateTarget?.type)).toEqual(requirements.slice(1).map(() => 'batch'));
+    const result = plan(ctx, analysis, linkRest(analysis));
+    expect(result.testCases).toHaveLength(1);
+    expect(result.testCases[0]).toMatchObject({ generationType: expected, status: 'draft', requirementIds: requirements.map((item) => item.id) });
+    expect(result.summary.needsConfirmation).toBe(expected === 'needs_confirmation' ? 1 : 0);
+    // 확인 필요 요구사항의 조건은 재검토 필요다.
+    for (const condition of result.testConditions) {
+      expect(condition.status).toBe(condition.requirementIds.some((id) => flaggedIn(requirements, id)) ? 'needs_review' : 'active');
+    }
+  });
+
+  it('같은 배치의 확인 필요 중복을 별도 신규로 만들면 그 TC만 확인 필요이고, 제외하면 앞선 TC는 그대로다', () => {
+    const ctx = withRequirements(requirement({ id: 'a' }), requirement({ id: 'b', needsConfirmation: true }));
+    const analysis = analyze(ctx, shared('a'), shared('b'));
+    const separate = plan(ctx, analysis, { [analysis.rows[1].candidate.key]: 'create_separate' });
+    expect(separate.testCases.map((item) => [item.requirementIds, item.generationType])).toEqual([
+      [['a'], 'source_explicit'],
+      [['b'], 'needs_confirmation'],
+    ]);
+    const excluded = plan(ctx, analysis, { [analysis.rows[1].candidate.key]: 'excluded' });
+    expect(excluded.testCases.map((item) => [item.requirementIds, item.generationType])).toEqual([[['a'], 'source_explicit']]);
+    expect(excluded.summary.needsConfirmation).toBe(0);
+  });
+
+  describe('기존 TC: 확인 필요 요구사항은 확인 필요가 아닌 기존 TC에 연결하지 않는다(기존 TC의 뜻을 바꾸지 않는다)', () => {
+    const existing = (overrides: Partial<TestCase> = {}) => existingTestCase(shared('x'), { requirementIds: ['req-old'], status: 'reviewed', ...overrides });
+
+    it.each([
+      ['직접 근거 TC', { generationType: 'source_explicit' }],
+      ['AI 제안 TC', { generationType: 'ai_suggestion' }],
+      ['기존 TC 가져오기', { generationType: 'imported_existing' }],
+    ] as [string, Partial<TestCase>][])('%s에는 연결을 고를 수 없고 기본은 판단 전(pending)이며, 연결 입력은 거부한다', (_, overrides) => {
+      const ctx = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+      ctx.testCases = [existing(overrides)];
+      const analysis = analyze(ctx, shared('x'));
+      const [row] = analysis.rows;
+      expect(row).toMatchObject({ kind: 'duplicate', needsConfirmation: true, duplicateTarget: { type: 'existing', linked: false, needsConfirmation: false } });
+      expect(row.reasons).toContain('확인 필요 요구사항이라 확인 필요가 아닌 기존 TC에는 연결할 수 없어요. 별도 신규로 만들거나 제외해 주세요.');
+      expect(testDraftDecisionOptions(row)).toEqual(['create_separate', 'excluded']);
+      expect(resolveTestDraftDecisions(analysis, { [row.candidate.key]: 'link_existing' })[row.candidate.key]).toBe('pending');
+      const forced = toTestDraftDecisionInputs(analysis).map((input) => ({ ...input, decision: 'link_existing' as const }));
+      expect(() => planTestDraftGeneration(ctx, analysis, forced, { createId, now: NOW })).toThrow('이 후보에는 쓸 수 없는 판단이에요.');
+    });
+
+    it('별도 신규는 확인 필요 새 TC이고 기존 TC는 그대로, 제외는 저장할 것이 없다', () => {
+      const ctx = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+      ctx.testCases = [existing()];
+      const before = structuredClone(ctx.testCases);
+      const analysis = analyze(ctx, shared('x'));
+      const separate = plan(ctx, analysis, { [analysis.rows[0].candidate.key]: 'create_separate' });
+      expect(separate.testCases[0]).toMatchObject({ generationType: 'needs_confirmation', requirementIds: ['x'] });
+      expect(separate.updatedTestCases).toEqual([]);
+      expect(() => plan(ctx, analysis, { [analysis.rows[0].candidate.key]: 'excluded' })).toThrow('새로 반영할 TC 초안 또는 연결이 없어요.');
+      expect(ctx.testCases).toEqual(before);
+    });
+
+    it('확인 필요 기존 TC에는 연결할 수 있고 기존 TC의 근거 유형 · 상태 · 기대 결과는 그대로다', () => {
+      const ctx = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+      ctx.testCases = [existing({ generationType: 'needs_confirmation', status: 'draft' })];
+      const analysis = analyze(ctx, shared('x'));
+      expect(testDraftDecisionOptions(analysis.rows[0])).toEqual(['link_existing', 'create_separate', 'excluded']);
+      const result = plan(ctx, analysis, { [analysis.rows[0].candidate.key]: 'link_existing' });
+      expect(result.updatedTestCases[0]).toMatchObject({
+        generationType: 'needs_confirmation',
+        status: 'draft',
+        expectedResult: '확인 필요 — 가입 결과를 확인한다.',
+        requirementIds: ['req-old', 'x'],
+        revision: 4,
+      });
+    });
+
+    it('계획 단계에서도 다시 확인한다: 분석 뒤 요구사항이 확인 필요가 된 데이터로는 연결 · 새 TC를 만들지 않는다', () => {
+      const plain = withRequirements(requirement({ id: 'x' }));
+      plain.testCases = [existing()];
+      const linkAnalysis = analyze(plain, shared('x'));
+      const flagged = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+      flagged.testCases = [existing()];
+      const linkInputs = toTestDraftDecisionInputs(linkAnalysis, { [linkAnalysis.rows[0].candidate.key]: 'link_existing' });
+      expect(() => planTestDraftGeneration(flagged, linkAnalysis, linkInputs, { createId, now: NOW })).toThrow('확인 필요 요구사항은 확인 필요가 아닌 기존 TC에 연결할 수 없어요.');
+      const newAnalysis = only(withRequirements(requirement({ id: 'x' })), ['normal_flow'], 'x');
+      const flaggedNew = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+      expect(() => planTestDraftGeneration(flaggedNew, newAnalysis, toTestDraftDecisionInputs(newAnalysis), { createId, now: NOW })).toThrow('확인 필요를 말하지 않아요');
+    });
+  });
+});
+
+describe('지문은 후보가 기대는 근거 요구사항의 현재 의미를 담는다(외부 생산자가 같은 후보를 다시 보내도)', () => {
+  const external = (requirementIds: string[]): TestDraftCandidate => ({ ...baseCandidate(), key: testDraftCandidateKey('normal_flow', requirementIds), requirementIds });
+  const analyze = (ctx: TestDraftContext, ids = ['req-x']) => analyzeTestDraftCandidates(ctx, [external(ids)], [], { requirementCount: ids.length, perspectiveCount: 1 });
+  const refs = [
+    { deliverableId: 'dlv-plan-pdf', locator: 'p.10' },
+    { deliverableId: 'dlv-plan-pdf', locator: 'p.11' },
+  ];
+  const original = () => requirement({ text: '출력 항목을 장부에 나타낸다.', sourceRefs: refs });
+
+  it.each([
+    ['문장', { text: '출력 항목을 장부에서 숨긴다.' }],
+    ['기능', { feature: '원장' }],
+    ['근거 유형(AI 제안)', { sourceType: 'ai_suggestion' }],
+    ['근거 유형(확인 필요)', { sourceType: 'needs_confirmation' }],
+    ['확인 필요 표시', { needsConfirmation: true }],
+    ['수명(제거)', { lifecycle: 'removed' }],
+    ['근거 추가', { sourceRefs: [...refs, { deliverableId: 'dlv-plan-pdf', locator: 'p.12' }] }],
+    ['근거 제거', { sourceRefs: refs.slice(0, 1) }],
+    ['근거 위치 변경', { sourceRefs: [refs[0], { deliverableId: 'dlv-plan-pdf', locator: 'p.99' }] }],
+  ] as [string, Partial<Requirement>][])('%s가 바뀌면 지문이 달라져 이전 미리보기로 저장할 수 없다', (_, change) => {
+    const before = analyze(withRequirements(original()));
+    const changed = withRequirements({ ...original(), ...change });
+    const after = analyze(changed);
+    expect(after.rows[0].candidate.key).toBe(before.rows[0].candidate.key);
+    expect(after.rows[0].fingerprint).not.toBe(before.rows[0].fingerprint);
+    expect(() => planTestDraftGeneration(changed, after, toTestDraftDecisionInputs(before), { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+  });
+
+  it('요구사항이 사라지면 오류 후보가 되고 지문이 달라진다', () => {
+    const before = analyze(withRequirements(original()));
+    const gone = withRequirements();
+    const after = analyze(gone);
+    expect(after.rows[0].kind).toBe('invalid');
+    expect(() => planTestDraftGeneration(gone, after, toTestDraftDecisionInputs(before), { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+  });
+
+  it.each([
+    ['문장의 공백', { text: '  출력 항목을   장부에 나타낸다. ' }],
+    ['근거 순서', { sourceRefs: [...refs].reverse() }],
+    ['같은 근거 중복', { sourceRefs: [...refs, refs[0]] }],
+    ['검토 상태', { status: 'reviewed' }],
+  ] as [string, Partial<Requirement>][])('%s만 바뀐 것은 같은 미리보기다', (_, change) => {
+    const before = analyze(withRequirements(original()));
+    const changed = withRequirements({ ...original(), ...change });
+    const after = analyze(changed);
+    expect(after.rows[0].fingerprint).toBe(before.rows[0].fingerprint);
+    expect(planTestDraftGeneration(changed, after, toTestDraftDecisionInputs(before), { createId, now: NOW }).testCases).toHaveLength(1);
+  });
+
+  it('관계없는 요구사항의 변경은 지문에 영향이 없고, 함께 연결된 요구사항 하나만 바뀌어도 달라진다', () => {
+    const other = requirement({ id: 'req-y', text: '다른 요구사항' });
+    const changedOther = { ...other, text: '바뀐 다른 요구사항' };
+    const before = analyze(withRequirements(original(), other));
+    expect(analyze(withRequirements(original(), changedOther)).rows[0].fingerprint).toBe(before.rows[0].fingerprint);
+    const pair = analyze(withRequirements(original(), other), ['req-x', 'req-y']);
+    expect(analyze(withRequirements(original(), changedOther), ['req-x', 'req-y']).rows[0].fingerprint).not.toBe(pair.rows[0].fingerprint);
+    expect(analyze(withRequirements(original(), other), ['req-y', 'req-x']).rows[0].fingerprint).toBe(pair.rows[0].fingerprint);
   });
 });
