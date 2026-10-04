@@ -187,6 +187,8 @@ describe('프로젝트 기록 탭', () => {
       // 과거 분석 A(v1.5)는 반영을 마쳤고, 이후 더 최신 분석 B(v99)가 생겼다.
       const analysisA = data.changeAnalyses.find((item) => item.id === 'cia-plan-v15')!;
       analysisA.status = 'applied';
+      // 시드 분석의 createdAt은 실행 시각 기준 상대값이라, 정렬이 날짜에 따라 뒤집히지 않도록 두 분석의 시각을 고정한다.
+      analysisA.createdAt = '2026-10-02T09:00:00.000Z';
       data.deliverables.push({ id: 'dlv-v99', projectId: PROJECT_A, type: 'pdf', title: '모바일_개편_기획_v99.pdf', importedAt: '2026-10-03T00:00:00.000Z' });
       data.changeAnalyses.push({ ...structuredClone(analysisA), id: 'cia-plan-v99', targetDeliverableId: 'dlv-v99', baselineDeliverableId: undefined, status: 'draft', createdAt: '2026-10-03T00:00:00.000Z' });
     });
