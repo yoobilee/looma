@@ -1,0 +1,217 @@
+.body {
+  display: grid;
+  /* 표처럼 넓은 내용이 대화상자 너비를 밀어내지 않도록 열을 부모 너비에 묶는다. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.caption {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.counts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 96px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.counts dt {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.counts dd {
+  margin: 0 0 0 auto;
+  font: var(--text-body-strong);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.notices {
+  display: grid;
+  gap: 4px;
+  padding-left: 16px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  list-style: disc;
+}
+
+.problems {
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-coral);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: var(--color-coral-soft);
+  color: var(--color-coral-strong);
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.error {
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-coral-strong);
+}
+
+/* 만들지 않은 조합 */
+.skipped {
+  padding: 10px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: var(--text-caption);
+}
+
+.skipped summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.skipped ul {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+/* 미리보기 표 */
+.scroller {
+  overflow-x: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control-lg);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table thead th {
+  padding: 10px;
+  background: var(--surface-soft);
+  font: var(--text-caption);
+  font-weight: 700;
+  color: var(--color-muted);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table tbody td {
+  padding: 12px 10px;
+  border-top: 1px solid var(--color-line);
+  vertical-align: top;
+}
+
+.rowNumber {
+  font: 600 11.5px/1.5 var(--font-sans);
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.wide {
+  min-width: 200px;
+}
+
+.rowTitle {
+  font: var(--text-body-strong);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin-top: 4px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.issues {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  font: var(--text-caption);
+}
+
+.issueError {
+  color: var(--color-coral-strong);
+  font-weight: 700;
+}
+
+.issueWarning {
+  color: var(--color-muted);
+}
+
+.exclude {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  font: var(--text-caption);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pendingNote,
+.readyNote {
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.pendingNote {
+  color: var(--color-coral-strong);
+}
+
+.readyNote {
+  color: var(--color-sky-strong);
+}
+
+/* 대화상자 footer 안에서는 안내 문구가 남는 공간을 차지하고 버튼을 오른쪽으로 민다. */
+footer .pendingNote,
+footer .readyNote {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.done {
+  display: grid;
+  gap: 8px;
+  line-height: 1.7;
+}
+
+.doneTitle {
+  font: var(--text-body-strong);
+  color: var(--color-sky-strong);
+}
+
+.decision {
+  height: 32px;
+  max-width: 180px;
+  padding: 0 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--color-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
