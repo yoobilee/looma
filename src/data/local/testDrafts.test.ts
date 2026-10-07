@@ -581,6 +581,55 @@ describe('확인 필요 TC의 상태 보호(저장소 경계)', () => {
     expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-plain-same')).toMatchObject({ generationType: 'source_explicit', status: 'reviewed', requirementIds: ['req-001'] });
   });
 
+  /** req-001 정상 흐름 후보와 같은 내용의 검토 완료 기존 TC. 연결 요구사항은 linkedTo다. */
+  async function seedWithLinkedSame(linkedTo: string[]) {
+    const probe = await open();
+    const { analysis: ruleBased } = await previewOf(probe.repos, { requirementIds: ['req-001'], perspectives: ['normal_flow'] });
+    const candidate = ruleBased.rows[0].candidate;
+    const seed = createSeed();
+    seed.testCases.push({
+      ...seed.testCases.find((item) => item.id === 'tc-001')!,
+      id: 'tc-linked-same',
+      externalId: 'SIGN-778',
+      category: candidate.perspective,
+      feature: candidate.testCase.feature,
+      title: candidate.testCase.title,
+      steps: [...candidate.testCase.steps],
+      expectedResult: candidate.testCase.expectedResult,
+      requirementIds: linkedTo,
+      generationType: 'source_explicit',
+      status: 'reviewed',
+    });
+    return { seed, key: candidate.key };
+  }
+
+  it('저장 경로: 기존 TC에 이미 연결된 요구사항이 확인 필요면 일반 요구사항의 후보도 그 TC에 연결할 수 없고 아무것도 저장하지 않는다', async () => {
+    const { seed, key } = await seedWithLinkedSame(['req-004']);
+    const { repos, base } = await open(seed);
+    const { analysis, input } = await previewOf(repos, { requirementIds: ['req-001'], perspectives: ['normal_flow'] }, { [key]: 'link_existing' });
+    expect(analysis.rows[0]).toMatchObject({ kind: 'duplicate', needsConfirmation: false, duplicateTarget: { type: 'existing', id: 'tc-linked-same', needsConfirmation: false, linkedNeedsConfirmation: true } });
+    expect(input.candidates[0].decision).toBe('pending');
+    const before = await snapshot(repos, base);
+    await expect(repos.testCases.createDraftsFromRequirements({ ...input, candidates: input.candidates.map((item) => ({ ...item, decision: 'link_existing' })) })).rejects.toThrow('이 후보에는 쓸 수 없는 판단이에요.');
+    expect(await snapshot(repos, base)).toEqual(before);
+    expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-linked-same')).toMatchObject({ status: 'reviewed', requirementIds: ['req-004'], revision: before.testCases.find((item) => item.id === 'tc-linked-same')!.revision });
+  });
+
+  it.each([
+    ['확인 필요 표시', (item: Requirement) => void (item.needsConfirmation = true)],
+    ['문장', (item: Requirement) => void (item.text = '바뀐 문장이다.')],
+    ['근거 위치', (item: Requirement) => void (item.sourceRefs = [{ deliverableId: 'dlv-plan-pdf', locator: 'p.99' }])],
+  ])('저장 경로: 미리보기 뒤 기존 TC에 이미 연결된 요구사항의 %s이(가) 바뀌면 연결을 저장하지 않는다', async (_, change) => {
+    const { seed, key } = await seedWithLinkedSame(['req-002']);
+    const { repos, base } = await open(seed);
+    const { input } = await previewOf(repos, { requirementIds: ['req-001'], perspectives: ['normal_flow'] }, { [key]: 'link_existing' });
+    expect(input.candidates[0].decision).toBe('link_existing');
+    await changeStored(base, repos, (data) => change(data.requirements.find((item) => item.id === 'req-002')!));
+    const before = await snapshot(repos, base);
+    await expect(repos.testCases.createDraftsFromRequirements(input)).rejects.toThrow(STALE);
+    expect(await snapshot(repos, base)).toEqual(before);
+  });
+
   it('일반 TC는 재검토 필요 → 검토 완료가 그대로 가능하다', async () => {
     const seed = createSeed();
     seed.testCases.find((item) => item.id === 'tc-001')!.status = 'needs_review';

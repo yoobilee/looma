@@ -16,6 +16,7 @@ import {
   TestDraftGenerationError,
   toTestDraftDecisionInputs,
   validateDraftTemplate,
+  type AnalyzedTestDraft,
   type TestDraftAnalysis,
   type TestDraftCandidate,
   type TestDraftContext,
@@ -958,6 +959,107 @@ describe('확인 필요 불변식: 하나로 합쳐지는 TC는 가장 엄격한
       const newAnalysis = only(withRequirements(requirement({ id: 'x' })), ['normal_flow'], 'x');
       const flaggedNew = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
       expect(() => planTestDraftGeneration(flaggedNew, newAnalysis, toTestDraftDecisionInputs(newAnalysis), { createId, now: NOW })).toThrow('확인 필요를 말하지 않아요');
+    });
+
+    describe('기존 TC에 이미 연결된 요구사항이 확인 필요여도 연결하지 않는다(최종 연결 요구사항 전체 기준)', () => {
+      const flaggedLinked = (change: Partial<Requirement>) => {
+        const ctx = withRequirements(requirement({ id: 'x' }), requirement({ id: 'b', text: '다른 요구사항이다.', ...change }));
+        ctx.testCases = [existing({ requirementIds: ['b'] })];
+        return ctx;
+      };
+
+      it.each([
+        ['확인 필요 표시', { needsConfirmation: true }],
+        ['근거 유형 확인 필요', { sourceType: 'needs_confirmation' }],
+      ] as [string, Partial<Requirement>][])('%s: 연결을 고를 수 없고, 연결 입력은 거부한다', (_, change) => {
+        const ctx = flaggedLinked(change);
+        const analysis = analyze(ctx, shared('x'));
+        const [row] = analysis.rows;
+        expect(row).toMatchObject({ kind: 'duplicate', needsConfirmation: false, duplicateTarget: { type: 'existing', needsConfirmation: false, linkedNeedsConfirmation: true } });
+        expect(row.reasons).toContain('기존 TC에 이미 연결된 요구사항이 확인 필요라 이 TC에는 연결할 수 없어요. 별도 신규로 만들거나 제외해 주세요.');
+        expect(testDraftDecisionOptions(row)).toEqual(['create_separate', 'excluded']);
+        expect(resolveTestDraftDecisions(analysis, { [row.candidate.key]: 'link_existing' })[row.candidate.key]).toBe('pending');
+        const forced = toTestDraftDecisionInputs(analysis).map((input) => ({ ...input, decision: 'link_existing' as const }));
+        expect(() => planTestDraftGeneration(ctx, analysis, forced, { createId, now: NOW })).toThrow('이 후보에는 쓸 수 없는 판단이에요.');
+        // 별도 신규는 그대로 만들 수 있고 기존 TC는 바뀌지 않는다.
+        const separate = plan(ctx, analysis, { [row.candidate.key]: 'create_separate' });
+        expect(separate.updatedTestCases).toEqual([]);
+        expect(separate.testCases[0]).toMatchObject({ generationType: 'source_explicit', requirementIds: ['x'] });
+      });
+
+      it('분석의 판정을 바꿔 연결을 허용해도 계획이 최종 연결 요구사항 전체를 다시 보고 거부한다', () => {
+        const ctx = flaggedLinked({ needsConfirmation: true });
+        const analysis = analyze(ctx, shared('x'));
+        const forged: TestDraftAnalysis = {
+          ...analysis,
+          rows: analysis.rows.map((row) => (row.duplicateTarget?.type === 'existing' ? { ...row, duplicateTarget: { ...row.duplicateTarget, linkedNeedsConfirmation: false } } : row)),
+        };
+        expect(testDraftDecisionOptions(forged.rows[0])).toContain('link_existing');
+        const inputs = toTestDraftDecisionInputs(forged, { [forged.rows[0].candidate.key]: 'link_existing' });
+        expect(() => planTestDraftGeneration(ctx, forged, inputs, { createId, now: NOW })).toThrow('확인 필요 요구사항은 확인 필요가 아닌 기존 TC에 연결할 수 없어요. (SIGN-099)');
+      });
+
+      it('확인 필요 기존 TC라면 이미 연결된 확인 필요 요구사항이 있어도 연결할 수 있다', () => {
+        const ctx = flaggedLinked({ needsConfirmation: true });
+        ctx.testCases = [existing({ requirementIds: ['b'], generationType: 'needs_confirmation', status: 'draft' })];
+        const analysis = analyze(ctx, shared('x'));
+        expect(testDraftDecisionOptions(analysis.rows[0])).toEqual(['link_existing', 'create_separate', 'excluded']);
+        expect(plan(ctx, analysis, { [analysis.rows[0].candidate.key]: 'link_existing' }).updatedTestCases[0]).toMatchObject({ generationType: 'needs_confirmation', requirementIds: ['b', 'x'] });
+      });
+    });
+
+    describe('기존 TC에 이미 연결된 요구사항이 바뀌면 오래된 미리보기다', () => {
+      const linkedTo = (b: Requirement | undefined) => {
+        const ctx = withRequirements(requirement({ id: 'x' }), ...(b ? [b] : []));
+        ctx.testCases = [existing({ requirementIds: ['b'] })];
+        return ctx;
+      };
+      const original = () => requirement({ id: 'b', text: '다른 요구사항이다.' });
+
+      it.each([
+        ['문장', { text: '바뀐 요구사항이다.' }],
+        ['기능', { feature: '원장' }],
+        ['근거 유형', { sourceType: 'ai_suggestion' }],
+        ['근거 위치', { sourceRefs: [{ deliverableId: 'dlv-plan-pdf', locator: 'p.99' }] }],
+        ['수명(제거)', { lifecycle: 'removed' }],
+        ['확인 필요 표시', { needsConfirmation: true }],
+        ['삭제', null],
+      ] as [string, Partial<Requirement> | null][])('%s → 지문이 달라지고, 이전 입력은 다시 분석해도 · 분석 없이 계획해도 거부한다', (_, change) => {
+        const before = analyze(linkedTo(original()), shared('x'));
+        const key = before.rows[0].candidate.key;
+        const oldInputs = toTestDraftDecisionInputs(before, { [key]: 'link_existing' });
+        expect(oldInputs[0].decision).toBe('link_existing');
+        const changed = linkedTo(change === null ? undefined : { ...original(), ...change });
+        const after = analyze(changed, shared('x'));
+        expect(after.rows[0].fingerprint).not.toBe(before.rows[0].fingerprint);
+        expect(() => planTestDraftGeneration(changed, after, oldInputs, { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+        // 이전 분석을 그대로 넘겨도 비교 대상 지문이 달라 거부한다.
+        expect(() => planTestDraftGeneration(changed, before, oldInputs, { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+      });
+    });
+
+    describe('계획에 넘긴 분석의 확인 필요 표시가 현재 요구사항보다 낮으면 거부한다(새 조건 상태 · 요약 보호)', () => {
+      it('분석 뒤 요구사항이 확인 필요가 됐는데 기대 결과가 이미 확인 필요를 말하는 후보도 저장하지 않는다', () => {
+        const plain = withRequirements(requirement({ id: 'x' }));
+        const analysis = analyze(plain, shared('x'));
+        expect(analysis.rows[0].needsConfirmation).toBe(false);
+        const flagged = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+        expect(() => planTestDraftGeneration(flagged, analysis, toTestDraftDecisionInputs(analysis), { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+      });
+
+      it.each([
+        ['확인 필요 표시만 낮춤', (row: AnalyzedTestDraft) => ({ ...row, needsConfirmation: false })],
+        ['확인 필요 표시와 근거 유형을 함께 낮춤', (row: AnalyzedTestDraft) => ({ ...row, needsConfirmation: false, candidate: { ...row.candidate, generationType: 'source_explicit' as const } })],
+      ])('%s → 거부한다', (_, lower) => {
+        const flagged = withRequirements(requirement({ id: 'x', needsConfirmation: true }));
+        const analysis = analyze(flagged, shared('x'));
+        const forged = { ...analysis, rows: analysis.rows.map(lower) };
+        expect(() => planTestDraftGeneration(flagged, forged, toTestDraftDecisionInputs(forged), { createId, now: NOW })).toThrow(StaleTestDraftPreviewError);
+        // 원래 분석은 조건 재검토 필요 · 요약 확인 필요 1로 만든다.
+        const result = plan(flagged, analysis);
+        expect(result.testConditions[0].status).toBe('needs_review');
+        expect(result.summary.needsConfirmation).toBe(1);
+      });
     });
   });
 });

@@ -471,6 +471,28 @@ describe('요구사항 기반 TC 초안: 미리보기 뒤 저장 결과가 달�
     expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-existing-draft')).toMatchObject({ precondition: 'session B', requirementIds: ['req-001'], revision: 4 });
   });
 
+  it('연결하려던 기존 TC에 이미 연결된 요구사항이 확인 필요가 되면 연결하지 않고 다시 확인하게 하며, 다시 확인하면 연결을 고를 수 없다', async () => {
+    const { view, repos } = await mount({ change: (data) => addDuplicateOfReq001(data, { requirementIds: ['req-002'], status: 'reviewed' }) });
+    await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('판단 필요')).toEqual(['1']);
+    await decide('기존 TC와 연결');
+    await expect.poll(() => counts('기존 TC 연결', '판단 필요')).toEqual(['1', '0']);
+    const before = await repos.testCases.listByProject(PROJECT_A);
+
+    // 비교 대상 TC는 그대로이고, 그 TC에 이미 연결된 다른 요구사항만 확인 필요가 된다.
+    await changeStored(repos, (data) => void (data.requirements.find((item) => item.id === 'req-002')!.needsConfirmation = true));
+    await expect.poll(() => dialog()!.textContent).toContain(STALE);
+    expect(isDisabled(makeButton())).toBe(true);
+    expect(await repos.testCases.listByProject(PROJECT_A)).toEqual(before);
+
+    await userEvent.click(button('미리보기 다시 확인'));
+    await expect.poll(() => counts('판단 필요')).toEqual(['1']);
+    expect([...decisionSelect().options].map((option) => option.textContent)).toEqual(['판단 필요', '별도 신규 TC로 만들기', '제외']);
+    expect(dialog()!.textContent).toContain('기존 TC에 이미 연결된 요구사항이 확인 필요라 이 TC에는 연결할 수 없어요.');
+    expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-existing-draft')).toMatchObject({ status: 'reviewed', requirementIds: ['req-002'], revision: 2 });
+  });
+
   it('미리보기 뒤 같은 테스트 조건이 생기면 저장하지 않고 다시 확인하게 한다', async () => {
     const { view, repos } = await mount();
     await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);

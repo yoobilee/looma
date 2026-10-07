@@ -183,8 +183,11 @@ const PLAIN_DENIED = '(?:하|되)지\\s*않';
  * 허락하는 쪽이 주체일 수 있어("관리자가 접근을 허용한다") "주체에게"에만 쓴다.
  */
 const GRANTED = `${MODIFIER}{0,2}[가-힣A-Za-z0-9]+(?:을|를|이|가)?\\s*(?:허용|허가)(?:하|한|합|되|된|됩)(?:지\\s*(?:않|못))?`;
-/** 권한 서술이 구절을 끝맺거나, "할 수 있고 · 할 수 없으며"처럼 대등하게 이어진다(조건 · 관형이 아니다). "하지 못하고"는 사건일 수 있어 이어짐으로 보지 않는다. */
-const PERMISSION_END = `(?:${CLAUSE_END}|(?<=있|없)(?:고|으며)(?=\\s*,?\\s))`;
+/**
+ * 권한 서술이 구절을 끝맺거나, "할 수 있고 · 할 수 없으며"처럼 대등하게, "할 수 있지만 · 할 수 없으나"처럼 대조로 이어진다(조건 · 관형이 아니다).
+ * "하지 못하고"는 사건일 수 있어 이어짐으로 보지 않는다.
+ */
+const PERMISSION_END = `(?:${CLAUSE_END}|(?<=있|없)(?:고|으며|지만|으나)(?=\\s*,?\\s))`;
 
 const permissionRelation = new RegExp(
   [
@@ -426,13 +429,19 @@ export const testDraftKindOrder: TestDraftKind[] = ['create', 'duplicate', 'inva
 export type TestDraftDecision = 'create' | 'link_existing' | 'create_separate' | 'excluded' | 'pending';
 
 /**
- * 중복의 비교 대상. existing은 이미 있는 TC(linked: 이 후보의 요구사항이 이미 그 TC에 연결됨 · needsConfirmation: 그 TC가 확인 필요 TC임), batch는 이번에 만드는 앞선 후보다.
+ * 중복의 비교 대상. existing은 이미 있는 TC(linked: 이 후보의 요구사항이 이미 그 TC에 연결됨 · needsConfirmation: 그 TC가 확인 필요 TC임 ·
+ * linkedNeedsConfirmation: 그 TC에 이미 연결된 요구사항 중 확인 필요가 있음), batch는 이번에 만드는 앞선 후보다.
  */
-export type TestDraftDuplicateTarget = { type: 'existing'; id: string; label: string; linked: boolean; needsConfirmation: boolean; snapshot: string } | { type: 'batch'; key: string };
+export type TestDraftDuplicateTarget =
+  | { type: 'existing'; id: string; label: string; linked: boolean; needsConfirmation: boolean; linkedNeedsConfirmation: boolean; snapshot: string }
+  | { type: 'batch'; key: string };
 
-/** 확인 필요 후보를 확인 필요가 아닌 기존 TC에 연결하면 기존 TC의 뜻(근거 유형 · 검토 가능 여부)이 조용히 바뀌므로 연결하지 않는다. */
+/**
+ * 연결한 뒤 기존 TC의 요구사항(이미 연결된 것 + 이 후보의 것) 중 확인 필요가 있는데 그 TC가 확인 필요 TC가 아니면,
+ * 확인 필요 요구사항에 이어진 TC가 검토 완료 · 사용 중으로 남아 뜻이 조용히 바뀌므로 연결하지 않는다.
+ */
 const linkWouldWeakenConfirmation = (row: Pick<AnalyzedTestDraft, 'needsConfirmation' | 'duplicateTarget'>) =>
-  row.needsConfirmation && row.duplicateTarget?.type === 'existing' && !row.duplicateTarget.needsConfirmation;
+  row.duplicateTarget?.type === 'existing' && !row.duplicateTarget.needsConfirmation && (row.needsConfirmation || row.duplicateTarget.linkedNeedsConfirmation);
 
 export interface AnalyzedTestDraft {
   candidate: TestDraftCandidate;
@@ -518,6 +527,13 @@ function requirementsSnapshot(requirementIds: string[], requirementById: Readonl
     return [id, requirement.projectId, clean(requirement.feature), clean(requirement.text), requirement.sourceType, requirement.needsConfirmation, requirement.lifecycle, refs];
   });
 }
+
+/**
+ * 비교 대상 기존 TC의 지문: TC 자체(testCaseSnapshot)와 그 TC에 이미 연결된 요구사항의 현재 의미(requirementsSnapshot).
+ * 연결할 수 있는지(확인 필요 보호)는 이미 연결된 요구사항에도 달려 있어, 그 요구사항만 바뀌어도 오래된 미리보기다.
+ */
+const duplicateTargetSnapshot = (testCase: TestCase, requirementById: ReadonlyMap<string, Requirement>) =>
+  hash53(JSON.stringify([testCaseSnapshot(testCase), requirementsSnapshot(testCase.requirementIds, requirementById)]));
 
 /**
  * 저장 결과를 정하는 모든 값을 담은 지문. 필드 순서가 고정된 배열을 직렬화해 안정적이다.
@@ -652,16 +668,28 @@ export function analyzeTestDraftCandidates(
     const existing = existingTestCases.get(identity);
     if (existing) {
       const alreadyLinked = candidate.requirementIds.every((id) => existing.requirementIds.includes(id));
-      const snapshot = testCaseSnapshot(existing);
+      const snapshot = duplicateTargetSnapshot(existing, requirementById);
       const targetNeedsConfirmation = existing.generationType === 'needs_confirmation';
+      const linkedNeedsConfirmation = generationTypeOf(existing.requirementIds.map((id) => requirementById.get(id)).filter((item): item is Requirement => !!item)) === 'needs_confirmation';
       const reasons = [alreadyLinked ? '같은 내용의 TC가 이미 있고 이 요구사항이 연결돼 있어요.' : '같은 내용의 TC가 이미 있어요. 이 요구사항은 그 TC에 연결돼 있지 않아요.'];
-      if (needsConfirmation && !targetNeedsConfirmation && !alreadyLinked) reasons.push('확인 필요 요구사항이라 확인 필요가 아닌 기존 TC에는 연결할 수 없어요. 별도 신규로 만들거나 제외해 주세요.');
+      if (!targetNeedsConfirmation && !alreadyLinked) {
+        if (needsConfirmation) reasons.push('확인 필요 요구사항이라 확인 필요가 아닌 기존 TC에는 연결할 수 없어요. 별도 신규로 만들거나 제외해 주세요.');
+        else if (linkedNeedsConfirmation) reasons.push('기존 TC에 이미 연결된 요구사항이 확인 필요라 이 TC에는 연결할 수 없어요. 별도 신규로 만들거나 제외해 주세요.');
+      }
       const row = {
         candidate,
         kind: 'duplicate' as const,
         reasons,
         needsConfirmation,
-        duplicateTarget: { type: 'existing' as const, id: existing.id, label: existing.externalId ?? existing.id, linked: alreadyLinked, needsConfirmation: targetNeedsConfirmation, snapshot },
+        duplicateTarget: {
+          type: 'existing' as const,
+          id: existing.id,
+          label: existing.externalId ?? existing.id,
+          linked: alreadyLinked,
+          needsConfirmation: targetNeedsConfirmation,
+          linkedNeedsConfirmation,
+          snapshot,
+        },
         ...condition,
         sourceRefs,
       };
@@ -838,7 +866,8 @@ const unionRefs = (a: SourceRef[], b: SourceRef[]): SourceRef[] => {
  *   이번에 만드는 앞선 후보에 연결하면 그 새 TC에 더하며 revision은 그대로(1)다.
  * - 새 TC는 초안 · revision 1이고 고객사 ID를 만들지 않는다. origin은 manual(규칙 기반이며 AI가 아님)이고 근거 유형은 요구사항에서 물려받는다.
  *   같은 배치의 뒤 후보가 연결되면 합쳐진 후보 · 요구사항 중 가장 엄격한 근거 유형으로 올린다(확인 필요 > AI 제안 > 직접 근거).
- * - 확인 필요 요구사항을 확인 필요가 아닌 기존 TC에 새로 연결하는 계획은 거부한다(기존 TC의 근거 유형 · 상태는 바꾸지 않는다).
+ * - 연결한 뒤 기존 TC의 요구사항(이미 연결된 것 포함) 중 확인 필요가 있는데 확인 필요 TC가 아니면 거부한다(기존 TC의 근거 유형 · 상태는 바꾸지 않는다).
+ * - 분석의 확인 필요 표시가 현재 요구사항 기준보다 낮으면 오래된 미리보기로 거부한다(새 조건 상태 · 요약이 확인 필요를 놓치지 않게).
  * 만들거나 연결할 것이 하나도 없으면 던진다.
  */
 export function planTestDraftGeneration(context: TestDraftContext, analysis: TestDraftAnalysis, inputs: readonly TestDraftDecisionInput[], options: TestDraftPlanOptions): TestDraftPlan {
@@ -931,6 +960,7 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
 
   // 연결: 기존 TC는 연결만 더하고, 이번에 만드는 앞선 후보의 TC에는 그 새 TC에 더한다.
   const existingById = new Map(context.testCases.filter((item) => item.projectId === context.project.id).map((item) => [item.id, item]));
+  const requirementById = new Map(context.requirements.filter((item) => item.projectId === context.project.id).map((item) => [item.id, item]));
   const linkedExisting = new Map<string, TestCase>();
   for (const row of analysis.rows) {
     if (decisionByKey.get(row.candidate.key) !== 'link_existing') continue;
@@ -949,13 +979,13 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
       continue;
     }
     const existing = existingById.get(target.id);
-    // 비교 대상이 미리보기 때와 같은 TC(같은 프로젝트 · 폐기되지 않음 · 같은 내용 · 판단에 영향을 주는 값이 모두 같음)인지 지문과 별개로 다시 확인한다.
+    // 비교 대상이 미리보기 때와 같은 TC(같은 프로젝트 · 폐기되지 않음 · 같은 내용 · 판단에 영향을 주는 값과 이미 연결된 요구사항의 의미가 모두 같음)인지 지문과 별개로 다시 확인한다.
     const sameTarget =
       !!existing &&
       existing.status !== 'deprecated' &&
       testCaseIdentity(existing.category, existing.feature, existing.title, existing.steps, existing.expectedResult) ===
         testCaseIdentity(row.candidate.perspective, row.candidate.testCase.feature, row.candidate.testCase.title, row.candidate.testCase.steps, row.candidate.testCase.expectedResult) &&
-      testCaseSnapshot(existing) === target.snapshot;
+      duplicateTargetSnapshot(existing, requirementById) === target.snapshot;
     if (!sameTarget) throw new StaleTestDraftPreviewError(STALE_TEST_DRAFT_PREVIEW_MESSAGE);
     linkedExisting.set(target.id, add(linkedExisting.get(target.id) ?? existing));
   }
@@ -967,7 +997,6 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
   }
 
   // 근거 유형 불변식: 최종 TC에 연결된 요구사항이 확인 필요면 그 TC는 확인 필요다. 화면 판단 · 생산자 값과 별개로 저장 직전에 다시 확인한다.
-  const requirementById = new Map(context.requirements.filter((item) => item.projectId === context.project.id).map((item) => [item.id, item]));
   const canonicalTypeOf = (requirementIds: string[]) => generationTypeOf(requirementIds.map((id) => requirementById.get(id)).filter((item): item is Requirement => !!item));
   const stricter = (a: TestCaseGenerationType, b: TestCaseGenerationType) => (generationTypeRank[b] > generationTypeRank[a] ? b : a);
   // 이번에 만드는 TC는 하나로 합쳐진 후보(만든 후보 + 연결한 뒤 후보)와 연결 요구사항 중 가장 엄격한 근거 유형으로 올린다.
@@ -985,12 +1014,17 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
     }
     testCase.generationType = stricter(testCase.generationType, canonical);
   }
-  // 기존 TC는 뜻을 바꾸지 않는다. 확인 필요가 아닌 기존 TC에 확인 필요 요구사항을 새로 연결하는 계획은 만들지 않는다(fail-closed).
+  // 기존 TC는 뜻을 바꾸지 않는다. 연결한 뒤의 요구사항 전체(이미 연결된 것 + 새로 더한 것) 중 확인 필요가 있는데 확인 필요 TC가 아니면 연결하지 않는다(fail-closed).
   for (const [id, merged] of linkedExisting) {
     const original = existingById.get(id)!;
-    const added = merged.requirementIds.filter((requirementId) => !original.requirementIds.includes(requirementId));
-    if (original.generationType !== 'needs_confirmation' && canonicalTypeOf(added) === 'needs_confirmation') {
+    if (original.generationType !== 'needs_confirmation' && canonicalTypeOf(merged.requirementIds) === 'needs_confirmation') {
       throw new TestDraftGenerationError(`확인 필요 요구사항은 확인 필요가 아닌 기존 TC에 연결할 수 없어요. (${original.externalId ?? original.id})`);
+    }
+  }
+  // 분석의 확인 필요 표시가 현재 요구사항보다 낮으면(분석 뒤 요구사항이 확인 필요가 됨 · 표시를 바꾼 분석) 새 조건 상태와 요약이 확인 필요를 놓치므로 저장하지 않는다.
+  for (const row of analysis.rows) {
+    if (row.needsConfirmation !== (row.candidate.generationType === 'needs_confirmation') || (!row.needsConfirmation && canonicalTypeOf(row.candidate.requirementIds) === 'needs_confirmation')) {
+      throw new StaleTestDraftPreviewError(STALE_TEST_DRAFT_PREVIEW_MESSAGE);
     }
   }
 
