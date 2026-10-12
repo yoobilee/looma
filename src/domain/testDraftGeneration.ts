@@ -507,7 +507,8 @@ function testCaseSnapshot(testCase: TestCase): string {
       testCase.templateId ?? null,
       testCase.externalId ?? null,
       testCase.duplicateOf ?? null,
-      testCase.requirementIds,
+      // 연결 요구사항은 집합이다. 순서만 바뀐 것은 같은 TC로 본다.
+      normalizeIds(testCase.requirementIds),
       testCase.testConditionIds,
       testCase.sourceRefs.map((ref) => [ref.deliverableId, ref.locator]),
     ]),
@@ -517,10 +518,10 @@ function testCaseSnapshot(testCase: TestCase): string {
 /**
  * 후보의 근거 요구사항이 지금 뜻하는 것. 후보 내용 · 확인 필요 여부 · 근거에 영향을 주는 값(프로젝트 · 기능 · 문장 · 근거 유형 · 확인 필요 · 수명 · 근거 위치)만 담는다.
  * 검토 상태(draft 등)는 생성에 쓰지 않아 뺀다. 문장 · 기능은 공백 · 유니코드 정규화만 무시하고, 근거 위치는 중복을 없애 정렬해 순서만 바뀐 것은 같다고 본다.
- * 찾을 수 없는 요구사항은 ID와 null로 남긴다(그 후보는 오류다).
+ * 찾을 수 없는 요구사항은 ID와 null로 남긴다(그 후보는 오류다). 요구사항 ID는 집합이라 중복을 없애 정렬하므로 입력 순서에 따라 값이 달라지지 않는다.
  */
 function requirementsSnapshot(requirementIds: string[], requirementById: ReadonlyMap<string, Requirement>): unknown {
-  return requirementIds.map((id) => {
+  return normalizeIds(requirementIds).map((id) => {
     const requirement = requirementById.get(id);
     if (!requirement) return [id, null];
     const refs = [...new Set(requirement.sourceRefs.map((ref) => JSON.stringify([ref.deliverableId, ref.locator])))].sort();

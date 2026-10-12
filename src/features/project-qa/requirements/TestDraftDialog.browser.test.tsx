@@ -493,6 +493,47 @@ describe('요구사항 기반 TC 초안: 미리보기 뒤 저장 결과가 달�
     expect((await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-existing-draft')).toMatchObject({ status: 'reviewed', requirementIds: ['req-002'], revision: 2 });
   });
 
+  it('연결하려던 기존 TC의 연결 요구사항 순서만 바뀌면 다시 확인하게 하지 않고 그대로 연결한다', async () => {
+    const linkedIds = ['req-003', 'req-006', 'req-007'];
+    const { view, repos } = await mount({ change: (data) => addDuplicateOfReq001(data, { requirementIds: linkedIds, status: 'reviewed' }) });
+    await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('판단 필요')).toEqual(['1']);
+    await decide('기존 TC와 연결');
+    await expect.poll(() => counts('기존 TC 연결', '판단 필요')).toEqual(['1', '0']);
+
+    await changeStored(repos, (data) => void (data.testCases.find((item) => item.id === 'tc-existing-draft')!.requirementIds = [...linkedIds].reverse()));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(dialog()!.textContent).not.toContain(STALE);
+    expect(isDisabled(makeButton())).toBe(false);
+
+    await userEvent.click(makeButton());
+    await expect.poll(() => dialog()?.textContent).toContain('기존 TC 1건에 연결했어요.');
+    const linked = (await repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-existing-draft')!;
+    expect([...linked.requirementIds].sort()).toEqual(['req-001', ...linkedIds].sort());
+  });
+
+  it('연결하려던 기존 TC의 연결 요구사항 순서와 함께 내용이 바뀌면 연결하지 않고 다시 확인하게 한다', async () => {
+    const linkedIds = ['req-003', 'req-006', 'req-007'];
+    const { view, repos } = await mount({ change: (data) => addDuplicateOfReq001(data, { requirementIds: linkedIds, status: 'reviewed' }) });
+    await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);
+    await userEvent.click(startButton());
+    await expect.poll(() => counts('판단 필요')).toEqual(['1']);
+    await decide('기존 TC와 연결');
+    await expect.poll(() => counts('기존 TC 연결', '판단 필요')).toEqual(['1', '0']);
+    const before = await repos.testCases.listByProject(PROJECT_A);
+
+    await changeStored(repos, (data) => {
+      data.testCases.find((item) => item.id === 'tc-existing-draft')!.requirementIds = [...linkedIds].reverse();
+      data.requirements.find((item) => item.id === 'req-003')!.text = '문장이 바뀜';
+    });
+    await expect.poll(() => dialog()!.textContent).toContain(STALE);
+    expect(isDisabled(makeButton())).toBe(true);
+    const stale = await repos.testCases.listByProject(PROJECT_A);
+    expect(stale.find((item) => item.id === 'tc-existing-draft')).toMatchObject({ revision: 2 });
+    expect(stale).toHaveLength(before.length);
+  });
+
   it('미리보기 뒤 같은 테스트 조건이 생기면 저장하지 않고 다시 확인하게 한다', async () => {
     const { view, repos } = await mount();
     await choose(view, { 회원가입: [REQ_001] }, ['정상 흐름']);

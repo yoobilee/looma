@@ -231,6 +231,74 @@ describe('연결할 기존 TC의 판단에 영향을 주는 값이 미리보기 
   });
 });
 
+describe('연결할 기존 TC의 요구사항 연결은 집합이다(순서만 바뀐 것은 오래된 미리보기가 아니다)', () => {
+  const link = { 'normal_flow|req-x': 'link_existing' as const };
+  const linkedIds = ['req-b', 'req-c', 'req-d'];
+  const linkedRequirements = (overrides: Record<string, Partial<Requirement>> = {}) =>
+    ['req-b', 'req-c', 'req-d', 'req-e'].map((id) => requirement({ id, text: `${id} 문장이다.`, ...overrides[id] }));
+  /** req-x 후보와 같은 내용의 기존 TC가 req-b · req-c · req-d에 연결돼 있고, req-x는 연결돼 있지 않다. */
+  const withLinked = ({ ids = linkedIds, requirements = linkedRequirements(), testCase = {} }: { ids?: string[]; requirements?: Requirement[]; testCase?: Partial<TestCase> } = {}) => {
+    const base = context();
+    return context({ requirements: [requirement(), ...requirements], testCases: [existingTestCase(base, { requirementIds: ids, ...testCase })] });
+  };
+  const fingerprintFor = (ctx: TestDraftContext) => analyze(ctx).rows[0].fingerprint;
+
+  it.each([
+    ['순서 변경', ['req-b', 'req-d', 'req-c']],
+    ['전체 뒤집기', ['req-d', 'req-c', 'req-b']],
+    ['임의 순열', ['req-c', 'req-d', 'req-b']],
+    ['중복 ID 포함', ['req-d', 'req-b', 'req-b', 'req-c', 'req-d']],
+  ])('%s: 같은 요구사항 집합이면 지문이 같고 이전 미리보기로 연결할 수 있다', (_, ids) => {
+    expect(fingerprintFor(withLinked({ ids }))).toBe(fingerprintFor(withLinked()));
+    expect(analyze(withLinked({ ids })).rows[0].duplicateTarget).toMatchObject({ type: 'existing', linked: false });
+    const plan = applyLater(withLinked(), withLinked({ ids }), link);
+    expect(plan.updatedTestCases).toHaveLength(1);
+    expect([...plan.updatedTestCases[0].requirementIds].sort()).toEqual(['req-b', 'req-c', 'req-d', 'req-x']);
+    // 반대 방향(바뀐 순서로 본 미리보기 → 원래 순서의 현재 데이터)도 같다.
+    expect(applyLater(withLinked({ ids }), withLinked(), link).updatedTestCases).toHaveLength(1);
+  });
+
+  it('연결된 요구사항 목록이 데이터에 놓인 순서만 달라도 지문이 같다', () => {
+    const reversed = withLinked({ ids: [...linkedIds].reverse(), requirements: [...linkedRequirements()].reverse() });
+    expect(fingerprintFor(reversed)).toBe(fingerprintFor(withLinked()));
+    expect(applyLater(withLinked(), reversed, link).updatedTestCases).toHaveLength(1);
+  });
+
+  it('연결된 요구사항의 근거 위치 순서만 달라도 지문이 같다', () => {
+    const refs = [
+      { deliverableId: 'dlv-plan-pdf', locator: 'p.1' },
+      { deliverableId: 'dlv-plan-pdf', locator: 'p.2' },
+    ];
+    const ordered = withLinked({ requirements: linkedRequirements({ 'req-b': { sourceRefs: refs } }) });
+    const reversed = withLinked({ requirements: linkedRequirements({ 'req-b': { sourceRefs: [...refs].reverse() } }) });
+    expect(fingerprintFor(reversed)).toBe(fingerprintFor(ordered));
+  });
+
+  it.each([
+    ['요구사항 하나 추가', () => withLinked({ ids: [...linkedIds, 'req-e'] })],
+    ['요구사항 하나 제거', () => withLinked({ ids: ['req-b', 'req-c'] })],
+    ['요구사항 ID 교체', () => withLinked({ ids: ['req-b', 'req-c', 'req-e'] })],
+    ['연결된 요구사항 문장 변경', () => withLinked({ requirements: linkedRequirements({ 'req-b': { text: '문장이 바뀌었다.' } }) })],
+    ['연결된 요구사항 기능 변경', () => withLinked({ requirements: linkedRequirements({ 'req-b': { feature: '다른 기능' } }) })],
+    ['연결된 요구사항 근거 유형 변경', () => withLinked({ requirements: linkedRequirements({ 'req-b': { sourceType: 'ai_suggestion' } }) })],
+    ['연결된 요구사항 확인 필요 변경', () => withLinked({ requirements: linkedRequirements({ 'req-b': { needsConfirmation: true } }) })],
+    ['연결된 요구사항 수명 변경', () => withLinked({ requirements: linkedRequirements({ 'req-b': { lifecycle: 'removed' } }) })],
+    ['연결된 요구사항 근거 추가', () => withLinked({ requirements: linkedRequirements({ 'req-b': { sourceRefs: [{ deliverableId: 'dlv-plan-pdf', locator: 'p.10' }, { deliverableId: 'dlv-plan-pdf', locator: 'p.11' }] } }) })],
+    ['연결된 요구사항 근거 제거', () => withLinked({ requirements: linkedRequirements({ 'req-b': { sourceRefs: [] } }) })],
+    ['연결된 요구사항 근거 위치 변경', () => withLinked({ requirements: linkedRequirements({ 'req-b': { sourceRefs: [{ deliverableId: 'dlv-plan-pdf', locator: 'p.99' }] } }) })],
+    ['연결된 요구사항 삭제', () => withLinked({ requirements: linkedRequirements().filter((item) => item.id !== 'req-d') })],
+  ] as [string, () => TestDraftContext][])('%s → 연결을 거부한다', (_, change) => {
+    expect(fingerprintFor(change())).not.toBe(fingerprintFor(withLinked()));
+    expect(() => applyLater(withLinked(), change(), link)).toThrow(StaleTestDraftPreviewError);
+    expect(() => applyLater(withLinked(), change(), link)).toThrow(STALE);
+  });
+
+  it('순서가 바뀌면서 내용도 바뀌면 여전히 거부한다', () => {
+    const changed = withLinked({ ids: [...linkedIds].reverse(), requirements: linkedRequirements({ 'req-c': { text: '문장이 바뀌었다.' } }) });
+    expect(() => applyLater(withLinked(), changed, link)).toThrow(STALE);
+  });
+});
+
 describe('지문 완전성: 새 TC에 영향을 주는 값이 모두 지문에 있다', () => {
   const fingerprintFor = (ctx: TestDraftContext) => analyze(ctx).rows[0].fingerprint;
   const reference = fingerprintFor(context());
