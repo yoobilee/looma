@@ -431,6 +431,34 @@ describe('중복 판단 저장', () => {
     }
   });
 
+  it('연결된 요구사항의 순서만 바뀌면 이전 미리보기로 연결할 수 있고, 내용이 바뀌면 여전히 거부한다', async () => {
+    const linkedIds = ['req-003', 'req-006', 'req-007'];
+    const targetOf = (data: AppData) => data.testCases.find((item) => item.id === 'tc-existing-same')!;
+
+    const ordered = await withDuplicate({ requirementIds: linkedIds });
+    const { input } = await previewOf(ordered.repos, ordered.request, { [ordered.key]: 'link_existing' });
+    await changeStored(ordered.base, ordered.repos, (data) => void (targetOf(data).requirementIds = [...linkedIds].reverse()));
+    await ordered.repos.testCases.createDraftsFromRequirements(input);
+    const linked = (await ordered.repos.testCases.listByProject(PROJECT_A)).find((item) => item.id === 'tc-existing-same')!;
+    expect([...linked.requirementIds].sort()).toEqual(['req-001', ...linkedIds].sort());
+    expect(linked.revision).toBe(4);
+    expect(await draftActivities(ordered.repos)).toHaveLength(1);
+
+    for (const change of [
+      (data: AppData) => void (targetOf(data).requirementIds = ['req-003', 'req-006']),
+      (data: AppData) => void (targetOf(data).requirementIds = [...linkedIds, 'req-001']),
+      (data: AppData) => void ((targetOf(data).requirementIds = [...linkedIds].reverse()), (data.requirements.find((item) => item.id === 'req-003')!.text = '문장이 바뀜')),
+      (data: AppData) => void ((targetOf(data).requirementIds = [...linkedIds].reverse()), (data.requirements.find((item) => item.id === 'req-006')!.needsConfirmation = true)),
+    ]) {
+      const { repos, base, request, key } = await withDuplicate({ requirementIds: linkedIds });
+      const preview = await previewOf(repos, request, { [key]: 'link_existing' });
+      await changeStored(base, repos, change);
+      const before = await snapshot(repos, base);
+      await expect(repos.testCases.createDraftsFromRequirements(preview.input)).rejects.toThrow(STALE);
+      expect(await snapshot(repos, base)).toEqual(before);
+    }
+  });
+
   it('다른 프로젝트의 같은 내용 TC · 폐기된 TC는 비교 대상이 아니라 신규다(연결할 수 없다)', async () => {
     for (const overrides of [{ projectId: PROJECT_B }, { status: 'deprecated' as const }]) {
       const { repos, request } = await withDuplicate(overrides);
