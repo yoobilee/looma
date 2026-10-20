@@ -10,7 +10,9 @@ import {
   testImpactNeedsDecision,
 } from '@/domain/changeImpact';
 import { analyzeRequirementImport, planRequirementImport, requirementImportInputProblems, requirementImportSummaryText, RequirementImportError } from '@/domain/requirementImport';
-import { analyzeTestDraftGeneration, planTestDraftGeneration, testDraftSummaryText } from '@/domain/testDraftGeneration';
+import { analyzeTestDraftCandidates, analyzeTestDraftGeneration, planTestDraftGeneration, TestDraftGenerationError, testDraftSummaryText } from '@/domain/testDraftGeneration';
+import { buildAiTestDraftCandidates } from '@/domain/aiTestDrafts';
+import { AI_LIMITS, parseAiDraftItems } from '@/shared/aiTestDraftContract';
 import { importSourceMimeType, toImportSourceSnapshot } from '@/domain/importSource';
 import { applyIssueChanges, buildIssue } from '@/domain/issues';
 import { analyzeTestAssetImport, planTestAssetImport, type ImportTable } from '@/domain/testAssetImport';
@@ -595,7 +597,20 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             templates: draft.templates,
           };
           // 순서: 현재 데이터로 분석(양식 확인 포함) → 지문 · 판단 확인 → 계획. 여기서 실패하면 아무것도 쓰지 않는다.
-          const analysis = analyzeTestDraftGeneration(context, { requirementIds: input.requirementIds, perspectives: input.perspectives });
+          const request = { requirementIds: input.requirementIds, perspectives: input.perspectives };
+          // AI 초안이 오면 규칙 기반 후보 대신 그 초안으로 후보를 만든다. 요청한 요구사항 · 관점 밖의 값은 여기서 다시 걸러 오류로 거부하고,
+          // 이후 분석 · 지문 확인 · 계획은 규칙 기반과 같다. 사용자가 본 초안과 다르면(내용 · 요구사항 · 기존 TC 변경) 지문이 달라 저장하지 않는다.
+          let analysis;
+          if (input.aiDrafts === undefined) analysis = analyzeTestDraftGeneration(context, request);
+          else {
+            if (input.aiDrafts.length > AI_LIMITS.maxDrafts || input.requirementIds.length > AI_LIMITS.maxRequirements || input.perspectives.length > AI_LIMITS.maxPerspectives) {
+              throw new TestDraftGenerationError('AI 초안은 소규모 배치(요구사항 5개 · 관점 3개)만 만들 수 있어요.');
+            }
+            const checked = parseAiDraftItems(input.aiDrafts, { requirementIds: input.requirementIds, perspectives: input.perspectives });
+            if (checked.rejected > 0) throw new TestDraftGenerationError('AI 초안에 요청하지 않은 요구사항이나 형식이 맞지 않는 값이 있어요.');
+            const produced = buildAiTestDraftCandidates(context, request, checked.drafts);
+            analysis = analyzeTestDraftCandidates(context, produced.candidates, produced.skipped, { requirementCount: input.requirementIds.length, perspectiveCount: input.perspectives.length });
+          }
           const plan = planTestDraftGeneration(context, analysis, input.candidates, { createId, now: nowIso() });
           draft.testConditions.push(...plan.testConditions);
           draft.testCases.push(...plan.testCases);
@@ -603,10 +618,10 @@ export function createLocalRepositories(options: LocalRepositoryOptions): Reposi
             const index = draft.testCases.findIndex((item) => item.id === updated.id);
             draft.testCases[index] = updated;
           }
-          const title = [plan.testCases.length > 0 && `TC 초안 ${plan.testCases.length}건 생성`, plan.updatedTestCases.length > 0 && `기존 TC ${plan.updatedTestCases.length}건 연결`].filter(Boolean).join(' · ');
+          const title = [plan.testCases.length > 0 && `${input.aiDrafts ? 'AI ' : ''}TC 초안 ${plan.testCases.length}건 생성`, plan.updatedTestCases.length > 0 && `기존 TC ${plan.updatedTestCases.length}건 연결`].filter(Boolean).join(' · ');
           record(draft, 'test_drafts_generated', title, {
             projectId: project.id,
-            metadata: { detail: testDraftSummaryText(plan), generatedTestCaseIds: plan.testCases.map((item) => item.id).join(',') },
+            metadata: { detail: `${input.aiDrafts ? 'AI 초안 · ' : ''}${testDraftSummaryText(plan)}`, generatedTestCaseIds: plan.testCases.map((item) => item.id).join(',') },
           });
           return { testCases: plan.testCases, updatedTestCases: plan.updatedTestCases, testConditions: plan.testConditions, summary: plan.summary };
         });

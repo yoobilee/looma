@@ -1,0 +1,108 @@
+.body {
+  display: grid;
+  gap: 14px;
+  max-width: 640px;
+}
+
+.providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.provider {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.provider input {
+  position: absolute;
+  opacity: 0;
+}
+
+.provider:has(input:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+
+.provider strong {
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.provider small {
+  font: var(--text-caption);
+  color: var(--color-muted);
+}
+
+.selected {
+  border-color: var(--color-sky);
+  box-shadow: 0 0 0 1px var(--color-sky);
+}
+
+/* 사용할 수 없는 공급자: 흐리게만 보이지 않도록 텍스트 대비는 유지하고 점선 테두리로 구분한다. */
+.disabled {
+  border-style: dashed;
+  background: var(--surface-sunken);
+  cursor: not-allowed;
+}
+
+.note {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.access {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-line);
+}
+
+.subtitle {
+  margin: 0;
+  font: var(--text-body-strong);
+  font-size: 13px;
+}
+
+.accessForm {
+  display: grid;
+  gap: 10px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status,
+.statusOff {
+  margin: 0;
+  font: var(--text-caption);
+  font-weight: 700;
+}
+
+.status {
+  color: var(--color-sky-strong);
+}
+
+.statusOff {
+  color: var(--color-coral-strong);
+}
+
+@media (max-width: 480px) {
+  .providers {
+    grid-template-columns: 1fr;
+  }
+}

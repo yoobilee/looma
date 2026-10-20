@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import type { ThemePreference } from '@/domain/types';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { AiSettingsSection } from '@/features/ai/AiSettingsSection';
 import { LocalDataResetDialog } from './LocalDataResetDialog';
 import styles from './SettingsPage.module.css';
 
@@ -16,7 +17,7 @@ const themeOptions: { value: ThemePreference; label: string; description: string
 const integrations = [
   { name: 'Google Calendar', detail: '오늘·다음 일정 읽기 전용 표시. 지금은 예시 일정이 보여요.' },
   { name: 'Figma', detail: 'Page/Frame 단위 산출물 연결. 지금은 링크만 저장해요.' },
-  { name: 'AI 분석', detail: '요구사항 분석, TC 초안, 용어 설명 초안. 결과는 항상 사람이 검토해요.' },
+  { name: 'AI 분석', detail: '요구사항 분석, 용어 설명 초안. 결과는 항상 사람이 검토해요. TC 초안은 AI 초안 항목에서 설정해요.' },
   { name: '파일 파싱', detail: 'PDF · DOCX · XLSX · CSV 내용 읽기와 TC XLSX 내보내기.' },
 ];
 
@@ -62,6 +63,8 @@ export function SettingsPage() {
             ))}
           </ul>
         </section>
+
+        <AiSettingsSection />
 
         <section aria-labelledby="local-data-title">
           <SectionHeader id="local-data-title" title="로컬 데이터" meta={savedLocally ? '이 브라우저에 저장 중' : '저장하지 않는 모드'} />

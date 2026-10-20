@@ -34,6 +34,7 @@ import type {
 import type { IssueChanges } from '@/domain/issues';
 import type { RequirementColumnMapping, RequirementImportSummary } from '@/domain/requirementImport';
 import type { TestDraftDecisionInput, TestDraftSummary } from '@/domain/testDraftGeneration';
+import type { AiDraftItem } from '@/shared/aiTestDraftContract';
 import type { ColumnMapping, ImportTable, TestAssetImportRowDecision } from '@/domain/testAssetImport';
 import type { ResultColumnMapping, ResultCycleInput, ResultImportRowDecision, ResultValueDecision } from '@/domain/testResultImport';
 
@@ -127,6 +128,11 @@ export interface CreateTestDraftsInput {
   perspectives: TestPerspective[];
   /** 미리보기에서 본 모든 후보와 사용자의 판단. 저장할 때 현재 데이터로 다시 분석해 지문이 모두 같을 때만 반영한다. */
   candidates: TestDraftDecisionInput[];
+  /**
+   * 미리보기에서 본 AI 초안. 있으면 규칙 기반 후보 대신 이 초안으로 후보를 만든다(없으면 규칙 기반).
+   * 저장소가 요청한 요구사항 · 관점 안의 값인지 다시 검증하고, 같은 분석 · 지문 확인을 거친다. AI가 기존 데이터를 바꾸지는 않는다.
+   */
+  aiDrafts?: AiDraftItem[];
 }
 
 export interface TestCaseRepository {
