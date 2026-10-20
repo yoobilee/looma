@@ -1,3 +1,4 @@
+import { readBoundedText } from './boundedBody.js';
 import {
   AI_LIMITS,
   AiContractError,
@@ -16,7 +17,7 @@ import {
 export const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 export const GROQ_MODEL = 'openai/gpt-oss-120b';
 
-const MAX_UPSTREAM_BODY_CHARS = 200_000;
+const MAX_UPSTREAM_BODY_BYTES = 200_000;
 
 export class UpstreamError extends Error {
   constructor(
@@ -95,7 +96,7 @@ export interface GroqCallOptions {
 
 export async function requestGroqTestDrafts(request: AiDraftRequest, options: GroqCallOptions): Promise<AiDraftResponse> {
   let response: Response;
-  let text: string;
+  let text: string | undefined;
   try {
     response = await options.fetch(GROQ_ENDPOINT, {
       method: 'POST',
@@ -103,8 +104,8 @@ export async function requestGroqTestDrafts(request: AiDraftRequest, options: Gr
       body: JSON.stringify(buildGroqBody(request)),
       signal: AbortSignal.timeout(options.timeoutMs),
     });
-    // 본문을 읽는 중에도 같은 시간 제한이 적용된다(signal이 fetch와 본문 읽기에 함께 걸린다).
-    text = await response.text();
+    // 본문을 읽는 중에도 같은 시간 제한이 적용된다(signal이 fetch와 본문 읽기에 함께 걸린다). 한도를 넘으면 읽기를 멈춘다.
+    text = await readBoundedText(response.body, response.headers.get('content-length'), MAX_UPSTREAM_BODY_BYTES);
   } catch (error) {
     if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) throw new UpstreamError('timeout', 504);
     throw new UpstreamError('upstream_error', 502);
@@ -112,7 +113,7 @@ export async function requestGroqTestDrafts(request: AiDraftRequest, options: Gr
 
   if (response.status === 429) throw new UpstreamError('rate_limited', 429, retryAfterOf(response) ?? 30);
   if (!response.ok) throw new UpstreamError('upstream_error', 502);
-  if (text.length > MAX_UPSTREAM_BODY_CHARS) throw new UpstreamError('invalid_response', 502);
+  if (text === undefined) throw new UpstreamError('invalid_response', 502);
 
   try {
     const body: unknown = JSON.parse(text);

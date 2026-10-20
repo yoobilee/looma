@@ -44,6 +44,8 @@ export const AI_LIMITS = {
 export const AI_SERVER_LIMITS = {
   /** 접근 코드 실패를 같은 접속자에서 이 횟수까지 받고, 그 뒤에는 코드를 비교하지 않고 거부한다. */
   maxFailedAttempts: 10,
+  /** 접속자를 가리지 않고 서버 전체에서 받는 실패 횟수. 접속자 구분 헤더를 바꿔 가며 시도해도 이 상한에 닿는다. */
+  maxFailedAttemptsAnyClient: 60,
   failedAttemptWindowMs: 60_000,
   maxRequestsPerWindow: 6,
   requestWindowMs: 60_000,

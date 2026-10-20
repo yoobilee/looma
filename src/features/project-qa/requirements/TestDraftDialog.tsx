@@ -292,6 +292,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
                         decision={resolved[row.candidate.key]}
                         requirementTexts={row.candidate.requirementIds.map((id) => requirementById.get(id)).filter((item): item is Requirement => !!item)}
                         sourceText={row.sourceRefs.map((ref) => `${deliverableTitle(ref.deliverableId)} ${ref.locator}`).join(', ')}
+                        showSteps={!!ai}
                         batchTitle={row.duplicateTarget?.type === 'batch' ? preview.value.rows.find((item) => item.candidate.key === (row.duplicateTarget as { key: string }).key)?.candidate.testCase.title : undefined}
                         onDecide={(decision) => decide(row.candidate.key, decision)}
                       />
@@ -326,10 +327,12 @@ interface PreviewRowProps {
   requirementTexts: Requirement[];
   sourceText: string;
   batchTitle?: string;
+  /** AI 초안은 저장되는 사전 조건 · 절차까지 검토할 수 있게 모두 보여 준다. */
+  showSteps: boolean;
   onDecide: (decision: TestDraftDecision) => void;
 }
 
-function PreviewRow({ row, decision, requirementTexts, sourceText, batchTitle, onDecide }: PreviewRowProps) {
+function PreviewRow({ row, decision, requirementTexts, sourceText, batchTitle, showSteps, onDecide }: PreviewRowProps) {
   const { candidate, kind, reasons, duplicateTarget } = row;
   const verdict =
     kind === 'create'
@@ -356,6 +359,14 @@ function PreviewRow({ row, decision, requirementTexts, sourceText, batchTitle, o
       <td className={styles.wide}>{candidate.condition.title}</td>
       <td className={styles.wide}>
         <p className={styles.rowTitle}>{candidate.testCase.title}</p>
+        {showSteps && candidate.testCase.precondition && <p className={styles.meta}>사전 조건 · {candidate.testCase.precondition}</p>}
+        {showSteps && (
+          <ol className={styles.steps} aria-label={`절차: ${candidate.testCase.title}`}>
+            {candidate.testCase.steps.map((step, index) => (
+              <li key={index}>{step}</li>
+            ))}
+          </ol>
+        )}
         <p className={styles.meta}>기대 결과 · {candidate.testCase.expectedResult}</p>
         {duplicateTarget?.type === 'existing' && (
           <p className={styles.meta}>

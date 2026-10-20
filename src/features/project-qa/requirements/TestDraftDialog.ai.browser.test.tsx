@@ -237,6 +237,28 @@ describe('AI TC 초안: 생성 → 검토 → 명시적 적용', () => {
     expect((await repos.activities.list())[0].title).toBe('AI TC 초안 1건 생성');
   });
 
+  it('AI 초안은 저장될 사전 조건 · 절차까지 미리보기에 모두 보여 줘서 적용 전에 검토할 수 있다 (규칙 기반 초안에는 절차 목록을 더하지 않는다)', async () => {
+    withAccessCode();
+    stubFetch(() => Promise.resolve(aiOk(aiItem('req-001', { precondition: '로그아웃된 상태여야 한다', steps: ['첫 번째 AI 절차', '두 번째 AI 절차', '세 번째 AI 절차'] }))));
+    const { view, repos } = await mount();
+    await choose(view, [REQ_001]);
+    await userEvent.click(startButton());
+    await expect.poll(() => dialog()?.querySelector('tbody ol')).toBeNull();
+    await expect.poll(() => isDisabled(aiButton())).toBe(false);
+    await userEvent.click(aiButton());
+    await expect.poll(() => dialog()?.textContent).toContain('AI가 만든 TC 제목');
+
+    const steps = dialog()!.querySelector('tbody ol[aria-label="절차: AI가 만든 TC 제목"]') as HTMLOListElement;
+    expect([...steps.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['첫 번째 AI 절차', '두 번째 AI 절차', '세 번째 AI 절차']);
+    expect(dialog()!.textContent).toContain('사전 조건 · 로그아웃된 상태여야 한다');
+    // 보이는 내용이 그대로 저장된다.
+    await userEvent.click(makeButton());
+    await expect.poll(() => dialog()?.textContent).toContain('TC 초안 1건을 만들고');
+    const saved = (await repos.testCases.listByProject(PROJECT_A)).at(-1)!;
+    expect(saved.steps).toEqual(['첫 번째 AI 절차', '두 번째 AI 절차', '세 번째 AI 절차']);
+    expect(saved.precondition).toBe('로그아웃된 상태여야 한다');
+  });
+
   it('확인 필요 요구사항의 AI 초안은 확인 필요로 표시되고 기대 결과가 확정처럼 보이지 않는다', async () => {
     withAccessCode();
     stubFetch(() => Promise.resolve(aiOk(aiItem('req-004', { expectedResult: '재동의 화면이 표시된다.' }))));

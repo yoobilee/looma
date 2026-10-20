@@ -215,3 +215,14 @@ footer .readyNote {
   font-size: 12px;
   font-weight: 700;
 }
+
+/* AI 초안의 절차: 저장되는 내용을 검토할 수 있게 항상 보인다. */
+.steps {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0;
+  padding-left: 18px;
+  font: var(--text-caption);
+  color: var(--color-muted);
+  list-style: decimal;
+}

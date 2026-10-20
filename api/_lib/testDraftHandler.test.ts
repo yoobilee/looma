@@ -386,13 +386,15 @@ describe('호출 제한', () => {
     expect((await handler(request())).status).toBe(200);
   });
 
-  it('WindowCounter는 키가 너무 많아지면 오래된 키부터 버린다', () => {
-    const counter = new WindowCounter(1, 1000, 2);
+  it('WindowCounter는 키가 너무 많아지면 한도에 닿지 않은 오래된 키부터 버린다', () => {
+    const counter = new WindowCounter(2, 1000, 2);
     counter.record('a', 0);
     counter.record('b', 0);
+    counter.record('b', 0);
     counter.record('c', 0);
+    // a는 한도에 닿지 않아 버려지고, 한도에 닿은 b는 남는다. (차단 중인 키를 지키는 동작은 reviewHardening.test.ts에서 확인)
     expect(counter.retryAfterSeconds('a', 1)).toBe(0);
-    expect(counter.retryAfterSeconds('c', 1)).toBe(1);
+    expect(counter.retryAfterSeconds('b', 1)).toBe(1);
   });
 });
 

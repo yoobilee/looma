@@ -7,6 +7,7 @@ import {
   type AiErrorCode,
 } from '../../src/shared/aiTestDraftContract.js';
 import { accessCodeMatches, clientKey, ConcurrencyGate, configuredAccessCode, WindowCounter } from './accessControl.js';
+import { readBoundedText } from './boundedBody.js';
 import { requestGroqTestDrafts, UpstreamError } from './groqTestDrafts.js';
 
 /*
@@ -40,36 +41,11 @@ function failure(code: AiErrorCode, status: number, retryAfterSeconds?: number):
   return respond({ error: { code, ...(retryAfterSeconds !== undefined && { retryAfterSeconds }) } }, status, extra);
 }
 
-/** 본문을 한도까지만 읽는다. 한도를 넘으면 읽기를 멈추고 undefined를 돌려준다. */
-async function readLimitedText(request: Request, maxBytes: number): Promise<string | undefined> {
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) return undefined;
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
 /** 호출 제한 · 동시 실행 제한 상태는 핸들러마다(= 서버리스 인스턴스마다) 따로 갖는다. */
 export function createTestDraftHandler(deps: TestDraftHandlerDeps): (request: Request) => Promise<Response> {
   const failedAttempts = new WindowCounter(AI_SERVER_LIMITS.maxFailedAttempts, AI_SERVER_LIMITS.failedAttemptWindowMs);
+  // 접속자 구분 헤더를 바꿔 가며 시도해도 서버 전체의 실패 횟수에는 상한이 있다.
+  const allFailedAttempts = new WindowCounter(AI_SERVER_LIMITS.maxFailedAttemptsAnyClient, AI_SERVER_LIMITS.failedAttemptWindowMs, 1);
   const requests = new WindowCounter(AI_SERVER_LIMITS.maxRequestsPerWindow, AI_SERVER_LIMITS.requestWindowMs, 1);
   const gate = new ConcurrencyGate(AI_SERVER_LIMITS.maxConcurrentRequests);
 
@@ -81,15 +57,16 @@ export function createTestDraftHandler(deps: TestDraftHandlerDeps): (request: Re
       if (expectedCode === undefined) return failure('not_configured', 503);
 
       const client = clientKey(request.headers);
-      const blockedFor = failedAttempts.retryAfterSeconds(client, deps.now());
+      const blockedFor = Math.max(failedAttempts.retryAfterSeconds(client, deps.now()), allFailedAttempts.retryAfterSeconds('all', deps.now()));
       if (blockedFor > 0) return failure('rate_limited', 429, blockedFor);
       if (!accessCodeMatches(expectedCode, request.headers.get(AI_ACCESS_CODE_HEADER))) {
         failedAttempts.record(client, deps.now());
+        allFailedAttempts.record('all', deps.now());
         return failure('unauthorized', 401);
       }
 
       if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return failure('unsupported_media_type', 415);
-      const bodyText = await readLimitedText(request, AI_LIMITS.maxRequestBytes);
+      const bodyText = await readBoundedText(request.body, request.headers.get('content-length'), AI_LIMITS.maxRequestBytes);
       if (bodyText === undefined) return failure('payload_too_large', 413);
 
       let draftRequest;

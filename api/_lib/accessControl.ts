@@ -23,7 +23,11 @@ export function accessCodeMatches(expected: string, provided: string | null | un
   return timingSafeEqual(digest(expected), digest((provided ?? '').trim())) && typeof provided === 'string';
 }
 
-/** 접속자 키별로 시간 창 안의 횟수를 센다. 키가 너무 많아지면 오래된 키부터 버려 메모리를 묶는다. */
+/**
+ * 접속자 키별로 시간 창 안의 횟수를 센다. 메모리를 묶으려고 키 수를 제한한다.
+ * 이미 한도에 닿은(차단 중인) 키는 정리하지 않는다 — 다른 키를 잔뜩 만들어 차단을 풀 수 없게 한다.
+ * 한도에 닿지 않은 키 중 오래된 것부터 정리하고, 모든 키가 차단 중이라 자리가 없으면 새 키는 차단된 것으로 본다(fail-closed).
+ */
 export class WindowCounter {
   private readonly hits = new Map<string, number[]>();
 
@@ -43,19 +47,41 @@ export class WindowCounter {
   /** 한도에 이미 닿았으면 다시 시도할 수 있을 때까지의 초, 아니면 0 */
   retryAfterSeconds(key: string, now: number): number {
     const times = this.recent(key, now);
-    if (times.length < this.limit) return 0;
-    return Math.max(1, Math.ceil((times[0] + this.windowMs - now) / 1000));
+    if (times.length >= this.limit) return Math.max(1, Math.ceil((times[0] + this.windowMs - now) / 1000));
+    // 기록이 없는 새 키인데 자리가 모두 차단 중인 키로 차 있으면 받을 수 없다.
+    if (times.length === 0 && this.isSaturated(now)) return Math.max(1, Math.ceil(this.windowMs / 1000));
+    return 0;
   }
 
   record(key: string, now: number): void {
     const times = this.recent(key, now);
+    if (times.length === 0 && this.hits.size >= this.maxKeys && !this.makeRoom(now)) return;
     times.push(now);
     this.hits.set(key, times);
-    while (this.hits.size > this.maxKeys) {
-      const oldest = this.hits.keys().next().value;
-      if (oldest === undefined) break;
-      this.hits.delete(oldest);
+  }
+
+  private pruneExpired(now: number): void {
+    for (const key of [...this.hits.keys()]) this.recent(key, now);
+  }
+
+  /** 자리가 없고 비울 수도 없다(모든 키가 차단 중) */
+  private isSaturated(now: number): boolean {
+    if (this.hits.size < this.maxKeys) return false;
+    this.pruneExpired(now);
+    return this.hits.size >= this.maxKeys && [...this.hits.values()].every((times) => times.length >= this.limit);
+  }
+
+  /** 한도에 닿지 않은 가장 오래된 키를 비운다. 모두 차단 중이면 false. */
+  private makeRoom(now: number): boolean {
+    this.pruneExpired(now);
+    if (this.hits.size < this.maxKeys) return true;
+    for (const [key, times] of this.hits) {
+      if (times.length < this.limit) {
+        this.hits.delete(key);
+        return true;
+      }
     }
+    return false;
   }
 }
 
