@@ -68,6 +68,8 @@ Vercel 프로젝트 → Settings → Environment Variables에 두 값을 등록�
 
 환경변수를 바꾼 뒤에는 새로 배포해야 적용됩니다. 변수 이름만 적은 예시는 [`.env.example`](.env.example)에 있습니다.
 
+Preview 배포가 Vercel Authentication으로 보호되어 있어도 그대로 두면 됩니다. 로그인한 브라우저에서 Preview를 열면 같은 주소로 보내는 AI 요청에 Vercel 인증 쿠키가 함께 가서 보호를 통과하고, 그 뒤에 접근 코드를 검사합니다. 보호를 끄거나 우회 키를 앱에 넣을 필요는 없습니다. 보호 단계에서 막히면 접근 코드 오류가 아니라 Vercel의 `401`(`Protected by Vercel Authentication`)이 응답 본문에 보입니다.
+
 로컬 `npm run dev`(Vite)는 서버 함수를 실행하지 않아 AI 버튼이 "서버 함수를 쓸 수 없어요"로 안내합니다. 서버 함수까지 확인하려면 `vercel dev`로 실행하고 `.env.local`에 위 두 값을 넣으세요(`.env.*`는 Git에서 제외됩니다).
 
 ### 실제 Groq 호출을 안전하게 확인하기

@@ -85,7 +85,8 @@ export function createGroqProvider(getFetch: () => typeof fetch = () => globalTh
           method: 'POST',
           headers: { 'content-type': 'application/json', [AI_ACCESS_CODE_HEADER]: accessCode },
           body: JSON.stringify(body),
-          credentials: 'omit',
+          // same-origin: Vercel 배포 보호(Vercel Authentication) 쿠키가 함께 가야 보호된 Preview에서도 함수에 닿는다. 함수는 쿠키를 읽지 않는다.
+          credentials: 'same-origin',
           cache: 'no-store',
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });

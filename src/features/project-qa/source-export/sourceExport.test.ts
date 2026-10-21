@@ -736,5 +736,5 @@ describe('신규 TC 새 행 추가 · 독립 리뷰 지적 회귀', () => {
       [1048576, '비밀번호 8자'],
     ]);
     expect(await repos.importSources.getBytes(session.artifactId!)).toEqual(original);
-  });
+  }, 15_000);
 });

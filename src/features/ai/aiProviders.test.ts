@@ -54,10 +54,16 @@ describe('Groq 공급자 (서버 함수 호출)', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(AI_TEST_DRAFT_ENDPOINT);
     expect(url).not.toContain(ACCESS_CODE);
-    expect(init).toMatchObject({ method: 'POST', credentials: 'omit', cache: 'no-store' });
+    expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', cache: 'no-store' });
     expect((init.headers as Record<string, string>)[AI_ACCESS_CODE_HEADER]).toBe(ACCESS_CODE);
     expect(init.body).not.toContain(ACCESS_CODE);
     expect(JSON.parse(init.body as string)).toEqual({ provider: 'groq', ...REQUEST });
+  });
+
+  it('credentials: same-origin은 엔드포인트가 상대 경로일 때만 안전하므로 외부 주소로 바뀌지 않게 고정한다', () => {
+    // 절대 URL이나 프로토콜 상대 URL(//host)이면 쿠키가 다른 출처로 갈 수 있다.
+    expect(AI_TEST_DRAFT_ENDPOINT).toMatch(/^\/(?!\/)/);
+    expect(new URL(AI_TEST_DRAFT_ENDPOINT, 'https://looma.example').origin).toBe('https://looma.example');
   });
 
   it('응답을 다시 검증해 요청하지 않은 요구사항 · 관점의 초안과 알 수 없는 필드를 버린다', async () => {
