@@ -1,6 +1,7 @@
 # Local secrets and environment files
 .env
 .env.*
+!.env.example
 
 # Local-only agent preferences
 CLAUDE.local.md

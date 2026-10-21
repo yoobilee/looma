@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import { repositories } from '@/data';
 import { testDraftDecisionLabel, testDraftKindLabel, testPerspectiveLabel } from '@/domain/labels';
+import { AI_DRAFT_OUTDATED_MESSAGE, aiDraftBasis, buildAiDraftRequest, buildAiTestDraftCandidates } from '@/domain/aiTestDrafts';
+import type { AiRequest } from '@/features/ai/aiProviders';
+import type { AiDraftItem, AiDraftResponse } from '@/shared/aiTestDraftContract';
 import {
+  analyzeTestDraftCandidates,
   analyzeTestDraftGeneration,
   resolveTestDraftDecisions,
   STALE_TEST_DRAFT_PREVIEW_MESSAGE,
@@ -19,6 +23,7 @@ import type { Deliverable, Project, Requirement, TCTemplate, TestCase, TestCondi
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Tag, type TagTone } from '@/components/ui/Tag';
+import { AiDraftControls } from './AiDraftControls';
 import styles from './TestDraftDialog.module.css';
 
 interface TestDraftDialogProps {
@@ -48,9 +53,32 @@ interface Frozen {
 /** 미리보기가 같은지 비교하는 값: 후보 · 내용 · 판정이 하나라도 달라지면 달라진다. */
 const signature = (preview: Preview) => preview.problem ?? preview.value.rows.map((row) => `${row.candidate.key}:${row.fingerprint}`).join('|');
 
+/** 사용자가 버튼을 눌러 받은 AI 초안. 후보일 뿐이며, 어떤 입력(basis)으로 만들었는지 함께 붙들어 둔다. */
+interface AiResult {
+  drafts: AiDraftItem[];
+  rejected: number;
+  providerName: string;
+  model: string;
+  basis: string;
+}
+
+/** AI 초안이 있으면 그 초안을, 없으면 규칙 기반 초안을 현재 데이터로 분석한 미리보기 */
+function previewOf(context: TestDraftContext, requirementIds: string[], perspectives: TestPerspective[], ai: AiResult | undefined): Preview {
+  try {
+    const request = { requirementIds, perspectives };
+    if (!ai) return { value: analyzeTestDraftGeneration(context, request) };
+    const produced = buildAiTestDraftCandidates(context, request, ai.drafts);
+    return { value: analyzeTestDraftCandidates(context, produced.candidates, produced.skipped, { requirementCount: requirementIds.length, perspectiveCount: perspectives.length }) };
+  } catch (error) {
+    return { problem: error instanceof TestDraftGenerationError ? error.message : '초안을 계산하지 못했어요.' };
+  }
+}
+
 /**
- * 요구사항과 테스트 관점으로 만들 TC 초안을 미리 보고, 중복을 판단한 뒤 확인했을 때만 저장한다. AI가 만드는 초안이 아니다.
+ * 요구사항과 테스트 관점으로 만들 TC 초안을 미리 보고, 중복을 판단한 뒤 확인했을 때만 저장한다.
+ * 기본은 규칙 기반 초안이고, 사용자가 AI 버튼을 눌렀을 때만 외부 AI의 초안으로 바꿔 볼 수 있다(자동 호출 없음). 어느 쪽이든 같은 분석 · 검토 · 저장 규칙을 거친다.
  * 열 때 계산한 미리보기를 그대로 저장 입력으로 보낸다. 그 사이 요구사항이나 기존 TC가 바뀌면(저장소도 다시 확인한다) 저장하지 않고 다시 확인하게 한다.
+ * AI 초안은 요구사항이 바뀌면 쓸 수 없다(AI가 본 입력과 달라진다). 이때는 다시 확인이 아니라 AI 초안을 다시 만들거나 규칙 기반으로 돌아가야 한다.
  */
 export function TestDraftDialog({ open, onClose, project, requirements, deliverables, testConditions, testCases, templates, requirementIds, perspectives }: TestDraftDialogProps) {
   const [chosen, setChosen] = useState<Record<string, TestDraftDecision>>({});
@@ -59,17 +87,22 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
   const [result, setResult] = useState<TestDraftSummary>();
 
   const context: TestDraftContext = useMemo(() => ({ project, requirements, deliverables, testConditions, testCases, templates }), [project, requirements, deliverables, testConditions, testCases, templates]);
-  const live = useMemo<Preview>(() => {
+  const [ai, setAi] = useState<AiResult>();
+  // AI에 보낼 내용. 규칙 기반으로 요청이 유효한지 확인된 요구사항 · 관점으로만 만든다.
+  const aiRequest = useMemo<AiRequest | undefined>(() => {
     try {
-      return { value: analyzeTestDraftGeneration(context, { requirementIds, perspectives }) };
-    } catch (error) {
-      return { problem: error instanceof TestDraftGenerationError ? error.message : '초안을 계산하지 못했어요.' };
+      return buildAiDraftRequest(context, { requirementIds, perspectives });
+    } catch {
+      return undefined;
     }
   }, [context, requirementIds, perspectives]);
+  // AI 초안을 만든 뒤 요구사항(문장 · 기능 · 확인 필요) 또는 선택이 바뀌었으면 그 초안은 더 이상 쓸 수 없다.
+  const aiOutdated = !!ai && (!aiRequest || ai.basis !== aiDraftBasis(aiRequest));
+  const live = useMemo<Preview>(() => previewOf(context, requirementIds, perspectives, ai), [context, requirementIds, perspectives, ai]);
   // 사용자가 본 미리보기. 열 때의 계산이고, "다시 확인"을 눌러야만 지금 데이터로 바뀐다.
   const [frozen, setFrozen] = useState<Frozen>({ result: live, requirements, deliverables });
-  const preview = frozen.result;
-  const stale = !busy && !result && signature(live) !== signature(preview);
+  const preview: Preview = aiOutdated ? { problem: AI_DRAFT_OUTDATED_MESSAGE } : frozen.result;
+  const stale = !busy && !result && !aiOutdated && signature(live) !== signature(frozen.result);
 
   const resolved = preview.value ? resolveTestDraftDecisions(preview.value, chosen) : {};
   const summary = preview.value ? summarizeTestDraftAnalysis(preview.value, chosen) : undefined;
@@ -79,6 +112,20 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
   const decide = (key: string, decision: TestDraftDecision) => setChosen((current) => ({ ...current, [key]: decision }));
   const recheck = () => {
     setFrozen({ result: live, requirements, deliverables });
+    setChosen({});
+    setApplyError('');
+  };
+  // 사용자가 AI 버튼을 눌러 받은 초안으로 미리보기를 바꾼다. 판단은 처음부터 다시 한다.
+  const acceptAiDrafts = (response: AiDraftResponse, request: AiRequest, providerName: string) => {
+    const next: AiResult = { drafts: response.drafts, rejected: response.rejected, providerName, model: response.model, basis: aiDraftBasis(request) };
+    setAi(next);
+    setFrozen({ result: previewOf(context, requirementIds, perspectives, next), requirements, deliverables });
+    setChosen({});
+    setApplyError('');
+  };
+  const returnToRules = () => {
+    setAi(undefined);
+    setFrozen({ result: previewOf(context, requirementIds, perspectives, undefined), requirements, deliverables });
     setChosen({});
     setApplyError('');
   };
@@ -93,6 +140,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
         requirementIds,
         perspectives,
         candidates: toTestDraftDecisionInputs(preview.value, chosen),
+        ...(ai && { aiDrafts: ai.drafts }),
       });
       setResult(created.summary);
     } catch (error) {
@@ -102,7 +150,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
     }
   };
 
-  const canApply = !!summary && summary.pending === 0 && summary.created + summary.linked + summary.linkedToNew > 0 && !stale && !busy;
+  const canApply = !!summary && summary.pending === 0 && summary.created + summary.linked + summary.linkedToNew > 0 && !stale && !aiOutdated && !busy;
   const statusNote = preview.problem
     ? preview.problem
     : stale
@@ -147,7 +195,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
       onClose={onClose}
       width="xl"
       title="TC 초안 만들기"
-      description="선택한 요구사항과 테스트 관점으로 기본 TC 초안을 만들어요. 만들기를 누르기 전까지는 아무것도 바뀌지 않아요."
+      description="선택한 요구사항과 테스트 관점으로 TC 초안을 만들어요. 기본은 규칙 기반 초안이고, AI 초안은 버튼을 눌렀을 때만 만들어요. 만들기를 누르기 전까지는 아무것도 바뀌지 않아요."
       footer={footer}
     >
       <div className={styles.body}>
@@ -161,6 +209,8 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
             </p>
           </div>
         )}
+
+        {!result && <AiDraftControls request={aiRequest} active={!!ai} locked={busy} onGenerated={acceptAiDrafts} onUseRules={returnToRules} />}
 
         {!result && preview.problem && (
           <p className={styles.problems} role="alert">
@@ -189,13 +239,22 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
               <Count label="제외" value={summary.excluded} />
             </dl>
             <ul className={styles.notices}>
-              <li>AI가 만든 초안이 아니에요. 요구사항 문장과 선택한 관점으로 만든 기본 초안이라, 화면 문구 · 입력값 같은 구체적인 내용은 검토하면서 채워 주세요.</li>
+              {ai ? (
+                <li>
+                  {ai.providerName}이(가) 만든 AI 초안이에요. 후보일 뿐이라 내용이 틀리거나 지어낸 값이 있을 수 있어요. 한 건씩 검토한 뒤 적용해 주세요.
+                  {ai.rejected > 0 ? ` AI 응답 중 ${ai.rejected}건은 요청하지 않은 요구사항이거나 형식이 맞지 않아 버렸어요.` : ''}
+                </li>
+              ) : (
+                <li>AI가 만든 초안이 아니에요. 요구사항 문장과 선택한 관점으로 만든 기본 초안이라, 화면 문구 · 입력값 같은 구체적인 내용은 검토하면서 채워 주세요.</li>
+              )}
               <li>기존 TC와 테스트 조건은 바꾸지 않아요. 같은 내용의 TC가 이미 있으면 기존 TC와 연결 · 별도 신규 · 제외 중에서 직접 골라 주세요. 연결은 요구사항 · 테스트 조건 · 근거 연결만 더하고 TC 내용은 그대로예요.</li>
               <li>확인 필요 요구사항으로 만든 초안은 확인이 끝나기 전에는 검토 완료로 표시할 수 없어요. 고객사 TC ID는 만들지 않아요.</li>
             </ul>
             {preview.value.skipped.length > 0 && (
               <details className={styles.skipped}>
-                <summary>단서가 없어 만들지 않은 조합 {preview.value.skipped.length}건</summary>
+                <summary>
+                  {ai ? 'AI가 만들지 않은 조합' : '단서가 없어 만들지 않은 조합'} {preview.value.skipped.length}건
+                </summary>
                 <ul>
                   {preview.value.skipped.map((item) => (
                     <li key={`${item.requirementId}-${item.perspective}`}>
@@ -233,6 +292,7 @@ export function TestDraftDialog({ open, onClose, project, requirements, delivera
                         decision={resolved[row.candidate.key]}
                         requirementTexts={row.candidate.requirementIds.map((id) => requirementById.get(id)).filter((item): item is Requirement => !!item)}
                         sourceText={row.sourceRefs.map((ref) => `${deliverableTitle(ref.deliverableId)} ${ref.locator}`).join(', ')}
+                        showSteps={!!ai}
                         batchTitle={row.duplicateTarget?.type === 'batch' ? preview.value.rows.find((item) => item.candidate.key === (row.duplicateTarget as { key: string }).key)?.candidate.testCase.title : undefined}
                         onDecide={(decision) => decide(row.candidate.key, decision)}
                       />
@@ -267,10 +327,12 @@ interface PreviewRowProps {
   requirementTexts: Requirement[];
   sourceText: string;
   batchTitle?: string;
+  /** AI 초안은 저장되는 사전 조건 · 절차까지 검토할 수 있게 모두 보여 준다. */
+  showSteps: boolean;
   onDecide: (decision: TestDraftDecision) => void;
 }
 
-function PreviewRow({ row, decision, requirementTexts, sourceText, batchTitle, onDecide }: PreviewRowProps) {
+function PreviewRow({ row, decision, requirementTexts, sourceText, batchTitle, showSteps, onDecide }: PreviewRowProps) {
   const { candidate, kind, reasons, duplicateTarget } = row;
   const verdict =
     kind === 'create'
@@ -297,6 +359,14 @@ function PreviewRow({ row, decision, requirementTexts, sourceText, batchTitle, o
       <td className={styles.wide}>{candidate.condition.title}</td>
       <td className={styles.wide}>
         <p className={styles.rowTitle}>{candidate.testCase.title}</p>
+        {showSteps && candidate.testCase.precondition && <p className={styles.meta}>사전 조건 · {candidate.testCase.precondition}</p>}
+        {showSteps && (
+          <ol className={styles.steps} aria-label={`절차: ${candidate.testCase.title}`}>
+            {candidate.testCase.steps.map((step, index) => (
+              <li key={index}>{step}</li>
+            ))}
+          </ol>
+        )}
         <p className={styles.meta}>기대 결과 · {candidate.testCase.expectedResult}</p>
         {duplicateTarget?.type === 'existing' && (
           <p className={styles.meta}>

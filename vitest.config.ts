@@ -9,7 +9,7 @@ export default mergeConfig(
     test: {
       projects: [
         // 도메인 로직 · 메모리 저장소 단위 테스트(Node)
-        { extends: true, test: { name: 'unit', include: ['src/**/*.test.{ts,tsx}'], exclude: ['src/**/*.browser.test.{ts,tsx}'] } },
+        { extends: true, test: { name: 'unit', include: ['src/**/*.test.{ts,tsx}', 'api/**/*.test.ts'], exclude: ['src/**/*.browser.test.{ts,tsx}'] } },
         // 실제 브라우저(Chromium headless)에서만 확인할 수 있는 동작. 지금은 IndexedDB transaction 회귀.
         {
           extends: true,

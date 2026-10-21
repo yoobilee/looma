@@ -6,7 +6,7 @@ import type { Deliverable, Project, Requirement, SourceRef, TCTemplate, TestCase
  *
  *   요구사항 + 관점 ─ 후보 생산자(지금은 규칙 기반) ─▶ TestDraftCandidate[] ─ 분석(중복 · 오류 · 조건 재사용) ─▶ 사용자 검토 · 판단 ─▶ 저장 계획
  *
- * 후보 생산자만 갈아 끼울 수 있다. 나중에 AI가 같은 TestDraftCandidate를 만들면 analyzeTestDraftCandidates부터 그대로 쓴다.
+ * 후보 생산자만 갈아 끼울 수 있다. AI가 만든 후보(aiTestDrafts.ts)도 같은 TestDraftCandidate라서 analyzeTestDraftCandidates부터 그대로 쓴다.
  * 규칙 기반 생산자는 요구사항에 없는 구체값(화면 문구 · 버튼 이름 · API 경로 · 상태 코드 · 시간 · 브라우저 버전)을 만들지 않는다.
  * 단서가 있는 관점(경계값 · 권한 · 상태 변화 · 데이터 · API · 성능)은 요구사항 문장에 그 단서가 있을 때만 후보를 만든다.
  *
@@ -33,6 +33,8 @@ export interface TestDraftCandidate {
   requirementIds: string[];
   /** 요구사항에서 물려받은 근거 유형. 확인 필요면 검토 완료로 표시할 수 없다. */
   generationType: TestCaseGenerationType;
+  /** 후보를 AI가 만들었으면 ai_generated. 없으면 Looma의 기본 규칙으로 만든 것(manual)이다. 저장하는 TC의 origin이 된다. */
+  origin?: 'ai_generated';
   condition: { feature: string; title: string };
   testCase: { feature: string; depth: string[]; title: string; precondition?: string; steps: string[]; expectedResult: string };
 }
@@ -81,7 +83,8 @@ export function validateDraftTemplate(context: Pick<TestDraftContext, 'project' 
   if (template.projectId !== undefined && template.projectId !== context.project.id) throw new TestDraftGenerationError(`다른 프로젝트의 TC 양식은 쓸 수 없어요. (${id})`);
 }
 
-function validateRequest(context: TestDraftContext, request: TestDraftRequest): Requirement[] {
+/** 요청(요구사항 · 관점)이 이 프로젝트에서 쓸 수 있는지 확인하고, 고른 순서대로 요구사항을 돌려준다. 규칙 기반 · AI 후보 생산자가 함께 쓴다. */
+export function validateRequest(context: TestDraftContext, request: TestDraftRequest): Requirement[] {
   if (request.requirementIds.length === 0) throw new TestDraftGenerationError('초안을 만들 요구사항을 하나 이상 골라 주세요.');
   if (request.perspectives.length === 0) throw new TestDraftGenerationError('테스트 관점을 하나 이상 골라 주세요.');
   const seenPerspectives = new Set<string>();
@@ -550,12 +553,13 @@ function fingerprintOf(
   const { candidate: c } = row;
   return hash53(
     JSON.stringify([
-      'v3',
+      'v4',
       save.requirements,
       c.key,
       c.perspective,
       c.requirementIds,
       c.generationType,
+      c.origin ?? null,
       c.condition.feature,
       c.condition.title,
       c.testCase.feature,
@@ -865,7 +869,7 @@ const unionRefs = (a: SourceRef[], b: SourceRef[]): SourceRef[] => {
  * - link_existing은 기존 TC의 요구사항 · 테스트 조건 · 근거 연결만 합집합으로 더하고 내용 · 상태 · 출처 · 고객사 ID는 바꾸지 않는다.
  *   연결로 설계 연결이 바뀐 기존 TC는 변경 영향 분석과 같은 규칙(요구사항 · 조건 · 근거는 설계 내용)으로 revision을 1 올리고 updatedAt을 갱신한다.
  *   이번에 만드는 앞선 후보에 연결하면 그 새 TC에 더하며 revision은 그대로(1)다.
- * - 새 TC는 초안 · revision 1이고 고객사 ID를 만들지 않는다. origin은 manual(규칙 기반이며 AI가 아님)이고 근거 유형은 요구사항에서 물려받는다.
+ * - 새 TC는 초안 · revision 1이고 고객사 ID를 만들지 않는다. origin은 후보를 만든 쪽을 따라 manual(규칙 기반) 또는 ai_generated(AI)이고 근거 유형은 요구사항에서 물려받는다.
  *   같은 배치의 뒤 후보가 연결되면 합쳐진 후보 · 요구사항 중 가장 엄격한 근거 유형으로 올린다(확인 필요 > AI 제안 > 직접 근거).
  * - 연결한 뒤 기존 TC의 요구사항(이미 연결된 것 포함) 중 확인 필요가 있는데 확인 필요 TC가 아니면 거부한다(기존 TC의 근거 유형 · 상태는 바꾸지 않는다).
  * - 분석의 확인 필요 표시가 현재 요구사항 기준보다 낮으면 오래된 미리보기로 거부한다(새 조건 상태 · 요약이 확인 필요를 놓치지 않게).
@@ -949,7 +953,7 @@ export function planTestDraftGeneration(context: TestDraftContext, analysis: Tes
       testConditionIds: [conditionIdFor(row)],
       sourceRefs: structuredClone(row.sourceRefs),
       generationType: candidate.generationType,
-      origin: 'manual',
+      origin: candidate.origin ?? 'manual',
       status: 'draft',
       revision: 1,
       createdAt: options.now,
