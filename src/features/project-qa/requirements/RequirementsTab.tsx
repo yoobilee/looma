@@ -5,6 +5,7 @@ import { useRepositoryData } from '@/hooks/useRepositoryData';
 import { basePerspectives, scopeDrivenPerspectives, testPerspectiveLabel } from '@/domain/labels';
 import { isTestDraftEligible } from '@/domain/testDraftGeneration';
 import type { Requirement, TestPerspective } from '@/domain/types';
+import { AI_LIMITS } from '@/shared/aiTestDraftContract';
 import { Button } from '@/components/ui/Button';
 import { CheckboxGroup } from '@/components/ui/Field';
 import { FilterTabs } from '@/components/ui/FilterTabs';
@@ -223,6 +224,8 @@ export function RequirementsTab() {
             options={availablePerspectives.map((value) => ({ value, label: testPerspectiveLabel[value] }))}
             value={perspectives}
             onChange={setPerspectives}
+            showCount
+            hint={`규칙 기반 생성은 개수 제한이 없고, AI 생성은 관점 ${AI_LIMITS.maxPerspectives}개까지 쓸 수 있어요.`}
           />
           <div className={styles.targetBar}>
             <p className={styles.caption} aria-live="polite">

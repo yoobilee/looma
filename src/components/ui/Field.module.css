@@ -75,23 +75,54 @@
 .chip {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 34px;
+  max-width: 100%;
   padding: 0 14px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-control);
   background: var(--surface);
   font: var(--text-body-strong);
   font-size: 13px;
   color: var(--color-muted);
   cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.chip:hover {
+  border-color: var(--color-sky);
 }
 
 .chip:has(input:focus-visible) {
   box-shadow: var(--focus-ring);
+  border-color: var(--color-sky);
 }
 
+.chip:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 선택됨: 배경 · 테두리 · 체크 아이콘 · 진한 글자로 색만 보고 판단하지 않게 한다. */
 .chipChecked {
-  border-color: transparent;
+  border-color: var(--color-sky);
   background: var(--color-sky-soft);
+  color: var(--color-ink);
+}
+
+.chipIcon {
+  flex: none;
   color: var(--color-sky-strong);
+}
+
+.chipCount {
+  color: var(--color-ink);
+}
+
+.chipHint {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--color-muted);
 }
