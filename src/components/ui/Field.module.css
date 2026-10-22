@@ -75,23 +75,70 @@
 .chip {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 34px;
+  max-width: 100%;
   padding: 0 14px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-control);
-  background: var(--surface);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
   font: var(--text-body-strong);
   font-size: 13px;
   color: var(--color-muted);
   cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.chip:hover {
+  border-color: color-mix(in srgb, var(--color-sky) 60%, transparent);
+  background: var(--surface);
 }
 
 .chip:has(input:focus-visible) {
   box-shadow: var(--focus-ring);
+  border-color: var(--color-sky);
 }
 
-.chipChecked {
-  border-color: transparent;
+.chip:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 선택됨: 은은한 Sky 배경과 테두리에 체크 아이콘 · 진한 글자를 더해 색만 보고 판단하지 않게 한다. */
+.chipChecked,
+.chipChecked:hover {
+  border-color: color-mix(in srgb, var(--color-sky) 45%, transparent);
   background: var(--color-sky-soft);
+  color: var(--color-ink);
+}
+
+.chipIcon {
+  flex: none;
+  margin-left: -2px;
   color: var(--color-sky-strong);
+}
+
+/* 범례: 제목은 왼쪽, 선택 개수는 오른쪽 보조 표시. */
+.legendRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 0;
+}
+
+.chipCount {
+  flex: none;
+  font: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+}
+
+.chipHint {
+  margin: 2px 0 0;
+  font: var(--text-caption);
+  color: var(--color-muted);
 }

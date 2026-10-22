@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import { forwardRef, useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import styles from './Field.module.css';
 
@@ -81,6 +82,7 @@ export function RadioGroup<T extends string>({ legend, name, options, value, onC
           return (
             <label key={option.value} className={`${styles.chip} ${checked ? styles.chipChecked : ''}`}>
               <input type="radio" className="visually-hidden" name={name} value={option.value} checked={checked} onChange={() => onChange(option.value)} />
+              {checked ? <Check className={styles.chipIcon} size={14} strokeWidth={2.5} aria-hidden="true" /> : null}
               {option.label}
             </label>
           );
@@ -95,12 +97,24 @@ interface CheckboxGroupProps<T extends string> {
   options: { value: T; label: string }[];
   value: T[];
   onChange: (next: T[]) => void;
+  /** 범례 오른쪽에 'N개 선택'을 보조 표시로 보여 준다. 선택 개수는 value에서 바로 센다. */
+  showCount?: boolean;
+  /** 칩 아래에 붙이는 안내 문구(예: 선택 개수 제한). */
+  hint?: string;
 }
 
-export function CheckboxGroup<T extends string>({ legend, options, value, onChange }: CheckboxGroupProps<T>) {
+export function CheckboxGroup<T extends string>({ legend, options, value, onChange, showCount, hint }: CheckboxGroupProps<T>) {
+  const selectedCount = options.filter((option) => value.includes(option.value)).length;
+  const hintId = useId();
   return (
-    <fieldset className={styles.fieldset}>
-      <legend className={styles.label}>{legend}</legend>
+    <fieldset className={styles.fieldset} aria-describedby={hint ? hintId : undefined}>
+      {showCount ? (
+        <legend className={`${styles.label} ${styles.legendRow}`}>
+          <span>{legend}</span> <span className={styles.chipCount}>{selectedCount}개 선택</span>
+        </legend>
+      ) : (
+        <legend className={styles.label}>{legend}</legend>
+      )}
       <div className={styles.chips}>
         {options.map((option) => {
           const checked = value.includes(option.value);
@@ -112,11 +126,17 @@ export function CheckboxGroup<T extends string>({ legend, options, value, onChan
                 checked={checked}
                 onChange={() => onChange(checked ? value.filter((item) => item !== option.value) : [...value, option.value])}
               />
+              {checked ? <Check className={styles.chipIcon} size={14} strokeWidth={2.5} aria-hidden="true" /> : null}
               {option.label}
             </label>
           );
         })}
       </div>
+      {hint ? (
+        <p id={hintId} className={styles.chipHint}>
+          {hint}
+        </p>
+      ) : null}
     </fieldset>
   );
 }

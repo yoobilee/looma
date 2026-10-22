@@ -662,3 +662,81 @@ describe('요구사항 기반 TC 초안: 390px', () => {
     expect(view.textContent).toContain('요구사항');
   });
 });
+
+describe('테스트 관점 선택 표시', () => {
+  const chipsOf = (view: HTMLElement) => [...view.querySelectorAll<HTMLLabelElement>('fieldset label')];
+  const perspectiveLegend = (view: HTMLElement) => view.querySelector('fieldset legend')!.textContent;
+  const hasCheckIcon = (item: HTMLElement) => item.querySelector('svg[aria-hidden="true"]') !== null;
+  const surface = (item: HTMLElement) => getComputedStyle(item).backgroundColor;
+
+  it('기본 선택 관점은 체크 아이콘과 개수로 보이고, 선택 · 해제를 누르면 표시와 개수가 함께 바뀐다', async () => {
+    const { view } = await mount();
+    const defaults = ['정상 흐름', '예외', '경계값', '권한', '상태 변화', '데이터 조회/저장'];
+    const checkedLabels = () => chipsOf(view).filter((item) => item.querySelector('input')!.checked).map((item) => item.textContent);
+    expect(checkedLabels().length).toBeGreaterThan(0);
+    expect(perspectiveLegend(view)).toBe(`테스트 관점 ${checkedLabels().length}개 선택`);
+    for (const item of chipsOf(view)) {
+      const on = item.querySelector('input')!.checked;
+      expect(hasCheckIcon(item)).toBe(on);
+    }
+    await setPerspectives(view, ['정상 흐름']);
+    expect(perspectiveLegend(view)).toBe('테스트 관점 1개 선택');
+    const on = chip(view, '정상 흐름');
+    const off = chip(view, '예외');
+    expect(hasCheckIcon(on)).toBe(true);
+    expect(hasCheckIcon(off)).toBe(false);
+    expect(surface(on)).not.toBe(surface(off));
+    expect(getComputedStyle(on).borderColor).not.toBe(getComputedStyle(off).borderColor);
+    await setPerspectives(view, defaults);
+    expect(perspectiveLegend(view)).toBe(`테스트 관점 ${defaults.length}개 선택`);
+    await setPerspectives(view, []);
+    expect(perspectiveLegend(view)).toBe('테스트 관점 0개 선택');
+    expect(isDisabled(startButton())).toBe(true);
+    expect(view.textContent).toContain('AI 생성은 최대 3개 관점까지');
+  });
+
+  it('최대 3개 관점 안내 문구가 fieldset의 접근성 설명으로 연결된다', async () => {
+    const { view } = await mount();
+    const fieldset = view.querySelector('fieldset')!;
+    const describedBy = fieldset.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const hint = document.getElementById(describedBy!);
+    expect(hint).not.toBeNull();
+    expect(fieldset.contains(hint)).toBe(true);
+    expect(hint!.textContent).toBe('AI 생성은 최대 3개 관점까지 선택할 수 있어요.');
+    // legend와 선택 개수는 그대로 유지된다.
+    expect(perspectiveLegend(view)).toMatch(/^테스트 관점 \d+개 선택$/);
+  });
+
+  it('키보드 Space로 선택 · 해제하고 초점 표시가 보이며, 스크린리더가 읽는 체크 상태가 바뀐다', async () => {
+    const { view } = await mount();
+    await setPerspectives(view, ['정상 흐름']);
+    const input = chip(view, '예외').querySelector('input')!;
+    expect(input.type).toBe('checkbox');
+    input.focus();
+    await userEvent.keyboard(' ');
+    expect(input.checked).toBe(true);
+    expect(perspectiveLegend(view)).toBe('테스트 관점 2개 선택');
+    expect(getComputedStyle(chip(view, '예외')).boxShadow).not.toBe('none');
+    await userEvent.keyboard(' ');
+    expect(input.checked).toBe(false);
+    expect(perspectiveLegend(view)).toBe('테스트 관점 1개 선택');
+  });
+
+  it('다크 테마에서도 선택 · 미선택 표시가 구분되고, 390px에서 가로로 넘치지 않는다', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    try {
+      await page.viewport(390, 844);
+      const { view } = await mount();
+      await setPerspectives(view, ['정상 흐름']);
+      const on = chip(view, '정상 흐름');
+      const off = chip(view, '예외');
+      expect(surface(on)).not.toBe(surface(off));
+      expect(hasCheckIcon(on)).toBe(true);
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+      for (const item of chipsOf(view)) expect(item.getBoundingClientRect().right).toBeLessThanOrEqual(390);
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
+  });
+});
