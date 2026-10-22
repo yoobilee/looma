@@ -105,8 +105,9 @@ interface CheckboxGroupProps<T extends string> {
 
 export function CheckboxGroup<T extends string>({ legend, options, value, onChange, showCount, hint }: CheckboxGroupProps<T>) {
   const selectedCount = options.filter((option) => value.includes(option.value)).length;
+  const hintId = useId();
   return (
-    <fieldset className={styles.fieldset}>
+    <fieldset className={styles.fieldset} aria-describedby={hint ? hintId : undefined}>
       {showCount ? (
         <legend className={`${styles.label} ${styles.legendRow}`}>
           <span>{legend}</span> <span className={styles.chipCount}>{selectedCount}개 선택</span>
@@ -131,7 +132,11 @@ export function CheckboxGroup<T extends string>({ legend, options, value, onChan
           );
         })}
       </div>
-      {hint ? <p className={styles.chipHint}>{hint}</p> : null}
+      {hint ? (
+        <p id={hintId} className={styles.chipHint}>
+          {hint}
+        </p>
+      ) : null}
     </fieldset>
   );
 }
