@@ -97,7 +97,7 @@ interface CheckboxGroupProps<T extends string> {
   options: { value: T; label: string }[];
   value: T[];
   onChange: (next: T[]) => void;
-  /** 범례 옆에 '· N개 선택'을 보여 준다. 선택 개수는 value에서 바로 센다. */
+  /** 범례 오른쪽에 'N개 선택'을 보조 표시로 보여 준다. 선택 개수는 value에서 바로 센다. */
   showCount?: boolean;
   /** 칩 아래에 붙이는 안내 문구(예: 선택 개수 제한). */
   hint?: string;
@@ -107,10 +107,13 @@ export function CheckboxGroup<T extends string>({ legend, options, value, onChan
   const selectedCount = options.filter((option) => value.includes(option.value)).length;
   return (
     <fieldset className={styles.fieldset}>
-      <legend className={styles.label}>
-        {legend}
-        {showCount ? <span className={styles.chipCount}> · {selectedCount}개 선택</span> : null}
-      </legend>
+      {showCount ? (
+        <legend className={`${styles.label} ${styles.legendRow}`}>
+          <span>{legend}</span> <span className={styles.chipCount}>{selectedCount}개 선택</span>
+        </legend>
+      ) : (
+        <legend className={styles.label}>{legend}</legend>
+      )}
       <div className={styles.chips}>
         {options.map((option) => {
           const checked = value.includes(option.value);

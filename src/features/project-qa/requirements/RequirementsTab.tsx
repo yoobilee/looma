@@ -225,7 +225,7 @@ export function RequirementsTab() {
             value={perspectives}
             onChange={setPerspectives}
             showCount
-            hint={`규칙 기반 생성은 개수 제한이 없고, AI 생성은 관점 ${AI_LIMITS.maxPerspectives}개까지 쓸 수 있어요.`}
+            hint={`AI 생성은 최대 ${AI_LIMITS.maxPerspectives}개 관점까지 선택할 수 있어요.`}
           />
           <div className={styles.targetBar}>
             <p className={styles.caption} aria-live="polite">

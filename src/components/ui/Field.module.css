@@ -80,8 +80,8 @@
   max-width: 100%;
   padding: 0 14px;
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-control);
-  background: var(--surface);
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
   font: var(--text-body-strong);
   font-size: 13px;
   color: var(--color-muted);
@@ -92,7 +92,8 @@
 }
 
 .chip:hover {
-  border-color: var(--color-sky);
+  border-color: color-mix(in srgb, var(--color-sky) 60%, transparent);
+  background: var(--surface);
 }
 
 .chip:has(input:focus-visible) {
@@ -105,24 +106,39 @@
   cursor: not-allowed;
 }
 
-/* 선택됨: 배경 · 테두리 · 체크 아이콘 · 진한 글자로 색만 보고 판단하지 않게 한다. */
-.chipChecked {
-  border-color: var(--color-sky);
+/* 선택됨: 은은한 Sky 배경과 테두리에 체크 아이콘 · 진한 글자를 더해 색만 보고 판단하지 않게 한다. */
+.chipChecked,
+.chipChecked:hover {
+  border-color: color-mix(in srgb, var(--color-sky) 45%, transparent);
   background: var(--color-sky-soft);
   color: var(--color-ink);
 }
 
 .chipIcon {
   flex: none;
+  margin-left: -2px;
   color: var(--color-sky-strong);
 }
 
+/* 범례: 제목은 왼쪽, 선택 개수는 오른쪽 보조 표시. */
+.legendRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 0;
+}
+
 .chipCount {
-  color: var(--color-ink);
+  flex: none;
+  font: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
 }
 
 .chipHint {
-  margin: 0;
+  margin: 2px 0 0;
   font: var(--text-caption);
   color: var(--color-muted);
 }

@@ -674,13 +674,13 @@ describe('테스트 관점 선택 표시', () => {
     const defaults = ['정상 흐름', '예외', '경계값', '권한', '상태 변화', '데이터 조회/저장'];
     const checkedLabels = () => chipsOf(view).filter((item) => item.querySelector('input')!.checked).map((item) => item.textContent);
     expect(checkedLabels().length).toBeGreaterThan(0);
-    expect(perspectiveLegend(view)).toBe(`테스트 관점 · ${checkedLabels().length}개 선택`);
+    expect(perspectiveLegend(view)).toBe(`테스트 관점 ${checkedLabels().length}개 선택`);
     for (const item of chipsOf(view)) {
       const on = item.querySelector('input')!.checked;
       expect(hasCheckIcon(item)).toBe(on);
     }
     await setPerspectives(view, ['정상 흐름']);
-    expect(perspectiveLegend(view)).toBe('테스트 관점 · 1개 선택');
+    expect(perspectiveLegend(view)).toBe('테스트 관점 1개 선택');
     const on = chip(view, '정상 흐름');
     const off = chip(view, '예외');
     expect(hasCheckIcon(on)).toBe(true);
@@ -688,11 +688,11 @@ describe('테스트 관점 선택 표시', () => {
     expect(surface(on)).not.toBe(surface(off));
     expect(getComputedStyle(on).borderColor).not.toBe(getComputedStyle(off).borderColor);
     await setPerspectives(view, defaults);
-    expect(perspectiveLegend(view)).toBe(`테스트 관점 · ${defaults.length}개 선택`);
+    expect(perspectiveLegend(view)).toBe(`테스트 관점 ${defaults.length}개 선택`);
     await setPerspectives(view, []);
-    expect(perspectiveLegend(view)).toBe('테스트 관점 · 0개 선택');
+    expect(perspectiveLegend(view)).toBe('테스트 관점 0개 선택');
     expect(isDisabled(startButton())).toBe(true);
-    expect(view.textContent).toContain('AI 생성은 관점 3개까지');
+    expect(view.textContent).toContain('AI 생성은 최대 3개 관점까지');
   });
 
   it('키보드 Space로 선택 · 해제하고 초점 표시가 보이며, 스크린리더가 읽는 체크 상태가 바뀐다', async () => {
@@ -703,11 +703,11 @@ describe('테스트 관점 선택 표시', () => {
     input.focus();
     await userEvent.keyboard(' ');
     expect(input.checked).toBe(true);
-    expect(perspectiveLegend(view)).toBe('테스트 관점 · 2개 선택');
+    expect(perspectiveLegend(view)).toBe('테스트 관점 2개 선택');
     expect(getComputedStyle(chip(view, '예외')).boxShadow).not.toBe('none');
     await userEvent.keyboard(' ');
     expect(input.checked).toBe(false);
-    expect(perspectiveLegend(view)).toBe('테스트 관점 · 1개 선택');
+    expect(perspectiveLegend(view)).toBe('테스트 관점 1개 선택');
   });
 
   it('다크 테마에서도 선택 · 미선택 표시가 구분되고, 390px에서 가로로 넘치지 않는다', async () => {
