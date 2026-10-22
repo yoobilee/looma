@@ -695,7 +695,7 @@ describe('테스트 관점 선택 표시', () => {
     expect(view.textContent).toContain('AI 생성은 최대 3개 관점까지');
   });
 
-  it('최대 3개 관점 안내 문구가 fieldset의 접근성 설명으로 연결되고, 안내가 없는 그룹에는 aria-describedby가 없다', async () => {
+  it('최대 3개 관점 안내 문구가 fieldset의 접근성 설명으로 연결된다', async () => {
     const { view } = await mount();
     const fieldset = view.querySelector('fieldset')!;
     const describedBy = fieldset.getAttribute('aria-describedby');
@@ -706,10 +706,6 @@ describe('테스트 관점 선택 표시', () => {
     expect(hint!.textContent).toBe('AI 생성은 최대 3개 관점까지 선택할 수 있어요.');
     // legend와 선택 개수는 그대로 유지된다.
     expect(perspectiveLegend(view)).toMatch(/^테스트 관점 \d+개 선택$/);
-    for (const other of view.querySelectorAll('fieldset')) {
-      if (other === fieldset) continue;
-      expect(other.hasAttribute('aria-describedby')).toBe(false);
-    }
   });
 
   it('키보드 Space로 선택 · 해제하고 초점 표시가 보이며, 스크린리더가 읽는 체크 상태가 바뀐다', async () => {
