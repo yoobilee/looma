@@ -179,6 +179,29 @@ describe('AI 후보 분석 (기존 보호 장치 유지)', () => {
     expect(analysis.rows[0].candidate.testCase.expectedResult).toBe('확인 필요 — 약관 재동의 화면이 표시된다.');
   });
 
+  it('AI가 기대 결과를 확인 필요로 밝힌 초안은 요구사항이 확인 필요가 아니어도 확인 필요로 두고, 밝히지 않은 초안은 AI 제안으로 둔다', async () => {
+    const { repos } = await open();
+    const request = { requirementIds: ['req-001', 'req-002'], perspectives: ['exception'] as TestPerspective[] };
+    const marked = '확인 필요 — 실패 시 보여 줄 문구와 잠금 정책이 정해지지 않았어요. 로그인되지 않는 것만 확인해요.';
+    const { analysis } = await aiPreview(repos, [aiDraft('req-001', 'exception', { expectedResult: marked }), aiDraft('req-002', 'exception')], request);
+    const [confirmation, plain] = analysis.rows;
+    expect(confirmation).toMatchObject({ kind: 'create', needsConfirmation: true });
+    expect(confirmation.candidate.generationType).toBe('needs_confirmation');
+    expect(confirmation.candidate.testCase.expectedResult).toBe(marked);
+    expect(plain).toMatchObject({ kind: 'create', needsConfirmation: false });
+    expect(plain.candidate.generationType).toBe('ai_suggestion');
+  });
+
+  it('확인 필요로 밝힌 AI 초안을 적용하면 확인 필요 TC로 저장되고 검토 완료로 바꿀 수 없다', async () => {
+    const { repos } = await open();
+    const request = { requirementIds: ['req-001'], perspectives: ['exception'] as TestPerspective[] };
+    const { input } = await aiPreview(repos, [aiDraft('req-001', 'exception', { expectedResult: '확인 필요 — 오류 문구 · 잠금 정책은 정해지지 않았어요.' })], request);
+    const result = await repos.testCases.createDraftsFromRequirements(input);
+    expect(result.testCases[0]).toMatchObject({ generationType: 'needs_confirmation', status: 'draft', origin: 'ai_generated' });
+    expect(result.testConditions[0].status).toBe('needs_review');
+    await expect(repos.testCases.updateStatus(result.testCases[0].id, 'reviewed')).rejects.toThrow('확인 필요 TC');
+  });
+
   it('AI가 일반 근거라고 주장해도 AI 제안 이상으로 다루고, 근거는 요구사항의 근거 산출물을 따른다 (추적성)', async () => {
     const { repos } = await open();
     const { analysis } = await aiPreview(repos, fullDrafts());

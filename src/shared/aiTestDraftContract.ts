@@ -179,6 +179,16 @@ export function parseAiDraftItems(raw: unknown, allowed: AllowedAiDrafts): { dra
   return { drafts, rejected };
 }
 
+/** AI가 요구사항으로 확정되지 않은 기대 결과를 밝힐 때 expectedResult 앞에 쓰는 표시. 규칙 기반 초안과 분석 단계가 쓰는 표시와 같다. */
+export const AI_CONFIRMATION_MARK = '확인 필요';
+
+/** 기대 결과가 확인 필요로 시작하는지. */
+export const isConfirmationExpectedResult = (expectedResult: string) => expectedResult.startsWith(AI_CONFIRMATION_MARK);
+
+/** 확인 필요 표시만 있고 무엇을 확인해야 하는지 없는 기대 결과인지. 사용자가 판단할 수 있는 내용이 없다. */
+const isBareConfirmationMark = (expectedResult: string) =>
+  isConfirmationExpectedResult(expectedResult) && expectedResult.slice(AI_CONFIRMATION_MARK.length).replace(/^[\s—–-]+/, '').length === 0;
+
 function parseAiDraftItem(item: unknown, allowed: AllowedAiDrafts): AiDraftItem | undefined {
   if (!isRecord(item)) return undefined;
   const { requirementId, perspective } = item;
@@ -189,6 +199,7 @@ function parseAiDraftItem(item: unknown, allowed: AllowedAiDrafts): AiDraftItem 
   const expectedResult = cleanText(item.expectedResult, AI_LIMITS.maxExpectedResultLength);
   const precondition = item.precondition === null || item.precondition === undefined ? null : cleanText(item.precondition, AI_LIMITS.maxPreconditionLength);
   if (conditionTitle === undefined || title === undefined || expectedResult === undefined || precondition === undefined) return undefined;
+  if (isBareConfirmationMark(expectedResult)) return undefined;
   if (!Array.isArray(item.steps) || item.steps.length === 0 || item.steps.length > AI_LIMITS.maxSteps) return undefined;
   const steps = item.steps.map((step) => cleanText(step, AI_LIMITS.maxStepLength));
   if (steps.some((step) => step === undefined)) return undefined;

@@ -1,7 +1,7 @@
 import { testPerspectiveLabel } from './labels';
 import { testDraftCandidateKey, validateRequest, type SkippedTestDraft, type TestDraftCandidate, type TestDraftContext, type TestDraftRequest } from './testDraftGeneration';
 import type { TestPerspective } from './types';
-import type { AiDraftItem, AiDraftRequest, AiPerspective } from '@/shared/aiTestDraftContract';
+import { isConfirmationExpectedResult, type AiDraftItem, type AiDraftRequest, type AiPerspective } from '@/shared/aiTestDraftContract';
 
 /*
  * AI가 만든 TC 초안을 기존 후보 형식(TestDraftCandidate)으로 바꾼다.
@@ -64,8 +64,9 @@ export function buildAiTestDraftCandidates(context: TestDraftContext, request: T
         key: testDraftCandidateKey(perspective, [requirement.id]),
         perspective,
         requirementIds: [requirement.id],
-        // 최소한 AI 제안이다. 요구사항이 확인 필요면 분석 단계가 확인 필요로 올린다.
-        generationType: 'ai_suggestion',
+        // 최소한 AI 제안이다. AI가 기대 결과를 확인 필요로 밝혔으면 확인 필요로 두어 검토 완료로 표시할 수 없게 한다(키워드로 근거를 판정하지 않고 AI가 밝힌 표시만 따른다).
+        // 요구사항이 확인 필요인 경우는 분석 단계가 요구사항 기준으로 확인 필요로 올린다.
+        generationType: isConfirmationExpectedResult(draft.expectedResult) ? 'needs_confirmation' : 'ai_suggestion',
         origin: 'ai_generated',
         condition: { feature: requirement.feature, title: draft.conditionTitle },
         testCase: {
